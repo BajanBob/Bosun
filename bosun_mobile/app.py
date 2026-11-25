@@ -40,8 +40,11 @@ class BosunMobile(toga.App):
 
     # ---------- layout ----------
     def _radio_tab(self) -> toga.Box:
+        from bosun.sdr.catalogue import picker_names
+
         first = models()[0]
-        self.model = toga.Selection(items=models(), on_change=self._model_changed,
+        self.model = toga.Selection(items=models() + picker_names(),
+                                    on_change=self._model_changed,
                                     style=Pack(flex=1))
         self.host = toga.TextInput(placeholder="e.g. 192.168.1.50", style=Pack(flex=1))
         self.port = toga.TextInput(placeholder="e.g. 4000", style=Pack(flex=1))
@@ -348,7 +351,16 @@ class BosunMobile(toga.App):
 
     # ---------- handlers ----------
     def _model_changed(self, widget) -> None:
-        if widget.value:
+        from bosun.sdr.catalogue import MODES, lookup
+
+        if not widget.value:
+            return
+        entry = lookup(str(widget.value))
+        if entry is not None:
+            self.mode.items = MODES
+            self._say(f"{entry['model']}: SDR receiver. Press Connect to start it on the "
+                      "SDR tab.")
+        else:
             self.mode.items = modes_for(widget.value)
 
     async def _toggle_connect(self, widget) -> None:
@@ -359,6 +371,8 @@ class BosunMobile(toga.App):
                 self.status.value = "Not connected."
                 widget.text = "Connect"
                 self._say("Disconnected.")
+            elif await self._connect_sdr(str(self.model.value)):
+                pass
             else:
                 self._say("Connecting...")
                 st = await self._run(self.ctl.connect, self.model.value,
@@ -370,6 +384,29 @@ class BosunMobile(toga.App):
             self._say(f"Error: {exc}")
         finally:
             widget.enabled = True
+
+    async def _connect_sdr(self, name: str) -> bool:
+        """If an SDR receiver was picked as the radio, start it on the SDR tab."""
+        from bosun.sdr.catalogue import lookup
+
+        entry = lookup(name)
+        if entry is None:
+            return False
+        if entry["source"] == "rtl_tcp":
+            self.sdr_kind.value = "rtl_tcp on the network"
+        elif entry["source"] == "rtlsdr":
+            self.sdr_kind.value = "RTL-SDR on this phone (USB OTG)"
+        else:
+            self._say(f"The {entry['model']} works with Bosun on Windows and Linux. On the "
+                      "phone, share it over the network with rtl_tcp or use an RTL-SDR.")
+            return True
+        if self.freq.value:
+            self.sdr_center.value = self.freq.value
+        with contextlib.suppress(Exception):
+            self.tabs.current_tab = "SDR"
+        if self.sdr_source is None:
+            await self._sdr_toggle(self.sdr_btn)
+        return True
 
     async def _tune(self, widget) -> None:
         try:

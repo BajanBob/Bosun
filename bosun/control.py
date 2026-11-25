@@ -37,6 +37,13 @@ def describe_catalogue() -> str:
         bands = ", ".join(f"{lo:g}-{hi:g}" for lo, hi in e["bands_mhz"])
         lines.append(f"{e['model']} ({e['vendor']})\n  Bands MHz: {bands}\n"
                      f"  Modes: {' '.join(e['modes'])}")
+    from .sdr.catalogue import catalogue as sdr_catalogue
+
+    lines.append("SDR RECEIVERS (receive only; use them on the Spectrum / SDR tab)")
+    for e in sdr_catalogue():
+        bands = ", ".join(f"{lo:g}-{hi:g}" for lo, hi in e["bands_mhz"])
+        lines.append(f"{e['model']} ({e['vendor']})\n  Bands MHz: {bands}\n"
+                     f"  Modes: {' '.join(e['modes'])}\n  {e['note']}")
     return "\n\n".join(lines)
 
 

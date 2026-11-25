@@ -21,6 +21,7 @@ from .control import (
     serial_ports,
 )
 from .radios import registry
+from .sdr import catalogue as sdrcat
 from .ui.tips import Tooltip, tip
 from .version import __version__
 
@@ -138,7 +139,7 @@ class BosunApp(ttk.Frame):
             box.columnconfigure(c, weight=1)
 
         ttk.Label(box, text="Radio").grid(row=0, column=0, sticky="w")
-        names = [m for ms in registry.vendors().values() for m in ms]
+        names = self._picker_names()
         self.model = tk.StringVar(value=names[0])
         self.model_box = tip(ttk.Combobox(box, textvariable=self.model, values=names,
                                           state="readonly"), "radio")
@@ -271,12 +272,17 @@ class BosunApp(ttk.Frame):
             bands = ", ".join(f"{lo:g}-{hi:g}" for lo, hi in e["bands_mhz"])
             tree.insert("", "end", values=(e["vendor"], e["model"], e["control"], bands,
                                            " ".join(e["modes"])))
+        for e in sdrcat.catalogue():
+            bands = ", ".join(f"{lo:g}-{hi:g}" for lo, hi in e["bands_mhz"])
+            tree.insert("", "end", values=(e["vendor"], e["model"], e["control"], bands,
+                                           " ".join(e["modes"])))
         tree.pack(fill="both", expand=True)
         ttk.Label(f, foreground="#555", wraplength=760, justify="left", text=(
             "Built in: Bosun talks to the radio directly. Profile: you copy the commands "
             "from the radio's remote-control manual once (Setup wizard). Audio only: no PC "
-            "control; record its audio and export channel lists.")).pack(anchor="w",
-                                                                         pady=PAD)
+            "control; record its audio and export channel lists. SDR receiver: receive "
+            "only; pick it as the Radio and press Connect to start it on the Spectrum "
+            "tab.")).pack(anchor="w", pady=PAD)
         return f
 
     # ---------- plumbing ----------
@@ -343,8 +349,7 @@ class BosunApp(ttk.Frame):
             self.settings = config.read_settings()
             Tooltip.enabled = bool(self.settings.get("hover_tips", True))
             self.tips_var.set(Tooltip.enabled)
-            names = [m for ms in registry.vendors().values() for m in ms]
-            self.model_box.configure(values=names)
+            self.model_box.configure(values=self._picker_names())
             self._apply_settings()
             if self.spectrum is not None and self.settings.get("sdr"):
                 self.spectrum.src_name.set(self.settings["sdr"])
@@ -537,8 +542,21 @@ class BosunApp(ttk.Frame):
         self._bg(scan_all, done=lambda hits: (resume(), done(hits)), fail=resume)
 
     # ---------- handlers ----------
+    @staticmethod
+    def _picker_names() -> list[str]:
+        return [m for ms in registry.vendors().values() for m in ms] + sdrcat.picker_names()
+
     def _model_changed(self, _event=None) -> None:
         if not hasattr(self, "mode_box"):
+            return
+        entry = sdrcat.lookup(self.model.get())
+        if entry is not None:
+            self.mode_box.configure(values=sdrcat.MODES)
+            if self.mode.get() not in sdrcat.MODES:
+                self.mode.set("FM")
+            if hasattr(self, "message"):
+                self.say(f"{entry['model']}: SDR receiver. {entry['note']} Press Connect "
+                         "to start it on the Spectrum tab.")
             return
         modes = modes_for(self.model.get())
         self.mode_box.configure(values=modes)
@@ -588,6 +606,10 @@ class BosunApp(ttk.Frame):
 
         self.message.set("Connecting...")
         model = self.model.get()
+        if sdrcat.is_sdr(model):
+            self.connect_btn.state(["!disabled"])
+            self.start_sdr(model)
+            return
         if getattr(registry.get(model), "audio_only", False):
             self._bg(self.ctl.connect_audio_only, model, done=done, fail=fail)
         elif self.link.get() == "serial":
@@ -596,6 +618,36 @@ class BosunApp(ttk.Frame):
         else:
             self._bg(self.ctl.connect, model, self.host.get(),
                      self.tcp_port.get(), done=done, fail=fail)
+
+    def start_sdr(self, model: str) -> None:
+        """Start an SDR receiver picked in the Radio list on the Spectrum tab."""
+        entry = sdrcat.lookup(model)
+        if self.spectrum is None or entry is None:
+            self.say("The Spectrum tab is not available, so the SDR cannot start.")
+            return
+        self.message.set(f"Looking for a {entry['model']}...")
+
+        def work():
+            from .sources import RTL_TCP_DEFAULT, list_sources
+            if entry["source"] == "rtl_tcp":
+                return RTL_TCP_DEFAULT
+            return sdrcat.match_source(entry, list_sources())
+
+        def done(name):
+            if not name:
+                self.say(f"No {entry['model']} found. Plug it in (on Windows install the "
+                         "WinUSB driver with Zadig once), then press Connect again.")
+                return
+            self.nb.select(self.spectrum)
+            self.spectrum.src_name.set(name)
+            freq = self.freq.get().strip()
+            if freq:
+                with contextlib.suppress(Exception):
+                    float(freq.replace(",", "."))
+                    self.spectrum.center.set(freq)
+            if self.spectrum._worker is None:
+                self.spectrum.toggle()
+        self._bg(work, done=done)
 
     def tune_radio(self, hz: float) -> None:
         """Called by the spectrum view when a signal is clicked."""
