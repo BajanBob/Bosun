@@ -2,9 +2,17 @@
 
 from .caps import Cap
 from .errors import (
-    BosunError, CodecError, ConfigError, MemoryError_, OutOfRange,
-    ProtocolError, RadioNotFound, ScanError, SDRUnavailable,
-    TransportError, UnsupportedCapability,
+    BosunError,
+    CodecError,
+    ConfigError,
+    MemoryError_,
+    OutOfRange,
+    ProtocolError,
+    RadioNotFound,
+    ScanError,
+    SDRUnavailable,
+    TransportError,
+    UnsupportedCapability,
 )
 from .version import __version__
 

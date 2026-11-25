@@ -9,3 +9,5 @@ dist/
 .mypy_cache/
 *.cf32
 .DS_Store
+logs/
+*.spec

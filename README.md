@@ -43,6 +43,12 @@ Library:
     radio.connect()
     radio.set_frequency(144_300_000)
 
+## Downloads
+
+Ready-built Windows, Linux and Android packages come from GitHub Actions; see
+[BUILD-PACKAGES.md](BUILD-PACKAGES.md). Requires Python 3.11+ when installing
+from source.
+
 ## Configuration
 
 Reads `$XDG_CONFIG_HOME/bosun/config.json` unless `--config` or `BOSUN_CONFIG`

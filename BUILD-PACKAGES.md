@@ -1,18 +1,30 @@
-# Bosun executable packages
+# Bosun packages
 
-The project is currently a command-line radio-control application. The
-Windows desktop package adds a double-click launcher, but it is not a GUI.
+Bosun is a command-line radio-control application. The Windows desktop
+package adds a double-click launcher, not a GUI. Bosun Mobile (Android) is a
+small touch front end for tuning, status and range scanning.
 
-## Automated native builds
+## Automated builds
 
-GitHub Actions workflow `.github/workflows/package.yml` builds native
-standalone packages on Windows and Linux. Run it from Actions → Build desktop
-packages → Run workflow, or push a version tag (`v*`). The resulting artifacts
-are named `Bosun-windows` and `Bosun-linux`.
+`.github/workflows/package.yml` runs on every push to `main`, on version tags
+(`v*`), and from Actions → Build Bosun Desktop Packages → Run workflow.
 
-- Windows executable: `Bosun-Windows-x64.zip` (standalone Bosun.exe)
-- Windows desktop: `Bosun-Windows-Desktop.zip` (Bosun.exe + desktop launcher)
-- Linux: `Bosun-Linux-x86_64.tar.gz` (standalone executable + launcher)
+| Artifact | File | Contents |
+|---|---|---|
+| `Bosun-windows` | `Bosun-Windows-x64.zip` | standalone `Bosun.exe` |
+| `Bosun-windows` | `Bosun-Windows-Desktop.zip` | `Bosun.exe` + double-click launcher |
+| `Bosun-linux` | `Bosun-Linux-x86_64.tar.gz` | standalone executable + launcher |
+| `Bosun-android` | `Bosun-Mobile-Android.apk` | Bosun Mobile (debug-signed, sideload) |
 
-The Windows executable must be built on Windows and the Linux executable on
-Linux; do not rename one platform's binary as the other platform's build.
+Each platform's binary must be built on that platform; do not rename one
+platform's build as another's.
+
+## Android notes
+
+- The APK connects to radios **over the network** (TCP): use ser2net, a
+  LAN-to-serial adapter or a Wi-Fi serial bridge attached to the radio's CAT
+  port. Direct USB-serial from the phone is not supported yet.
+- The APK is debug-signed. Install it by allowing "Install unknown apps" for
+  your browser or file manager. A Play Store release needs a signed AAB
+  (`briefcase package android` with your own keystore).
+- Build locally: `pip install briefcase && briefcase create android && briefcase build android`.

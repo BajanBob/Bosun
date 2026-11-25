@@ -7,14 +7,13 @@ name = "bosun"
 version = "0.2.0"
 description = "Radio control layer for the ARGUS-Q receiver family"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 keywords = ["radio", "cat", "civ", "sdr", "ham", "scanner"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -34,23 +33,47 @@ test = ["pytest>=7", "ruff>=0.5"]
 bosun = "bosun.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["bosun*"]
+include = ["bosun", "bosun.*"]
 
 [tool.setuptools.package-data]
 bosun = ["profiles/*.json", "py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-ra"
 
 [tool.ruff]
 line-length = 90
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 ignore_missing_imports = true
+
+# ---------- Android app (Bosun Mobile), built with Briefcase ----------
+[tool.briefcase]
+project_name = "Bosun"
+bundle = "io.github.bajanbob"
+url = "https://github.com/BajanBob/Bosun"
+author = "BajanBob"
+author_email = "bajanbob@users.noreply.github.com"
+
+[tool.briefcase.app.bosun_mobile]
+formal_name = "Bosun Mobile"
+description = "Radio control for ARGUS-Q receivers over the network"
+long_description = "Tune, read status and range-scan supported Icom, Yaesu and AOR radios through a serial-to-network adapter."
+sources = ["bosun", "bosun_mobile"]
+test_sources = ["tests"]
+
+[tool.briefcase.app.bosun_mobile.android]
+requires = ["toga-android~=0.5.0"]
+base_theme = "Theme.MaterialComponents.Light.DarkActionBar"
+build_gradle_dependencies = [
+  "com.google.android.material:material:1.12.0",
+  "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0",
+]

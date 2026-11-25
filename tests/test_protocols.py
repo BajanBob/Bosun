@@ -1,10 +1,14 @@
 import pytest
 
-from bosun.errors import OutOfRange, ProtocolError, UnsupportedCapability
+from bosun.errors import MemoryError_, OutOfRange, ProtocolError, UnsupportedCapability
 from bosun.memory import Memory
 from bosun.radios.drivers import AR8200, AR8600, FT991A, IC9100, IC9700
 from bosun.radios.protocols import (
-    AorCodec, AsciiCatCodec, CivCodec, bcd_decode, bcd_encode,
+    AorCodec,
+    AsciiCatCodec,
+    CivCodec,
+    bcd_decode,
+    bcd_encode,
 )
 from bosun.transport import NullTransport
 
@@ -102,5 +106,5 @@ def test_icom_memory_write_payload():
 
 
 def test_label_too_long():
-    with pytest.raises(Exception):
+    with pytest.raises(MemoryError_):
         Memory(1, 14_000_000, "USB", "TOOLONG10").validate()

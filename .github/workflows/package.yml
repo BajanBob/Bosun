@@ -1,11 +1,10 @@
-
 name: Build Bosun Desktop Packages
 
 on:
   workflow_dispatch:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -42,6 +41,12 @@ jobs:
           --collect-all bosun
           packaging/entry.py
 
+      - name: Smoke test executable
+        shell: bash
+        run: |
+          if [ -f dist/Bosun.exe ]; then ./dist/Bosun.exe --version; else ./dist/Bosun --version; fi
+          if [ -f dist/Bosun.exe ]; then ./dist/Bosun.exe list; else ./dist/Bosun list; fi
+
       - name: Package Windows builds
         if: matrix.name == 'windows'
         shell: pwsh
@@ -70,4 +75,40 @@ jobs:
             Bosun-Windows-x64.zip
             Bosun-Windows-Desktop.zip
             Bosun-Linux-x86_64.tar.gz
-          if-no-files-found: ignore
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Briefcase
+        run: python -m pip install --upgrade pip briefcase
+
+      - name: Build APK
+        # Briefcase installs its own Android SDK; ignore the runner's preinstalled one.
+        run: |
+          env -u ANDROID_HOME -u ANDROID_SDK_ROOT briefcase create android --no-input
+          env -u ANDROID_HOME -u ANDROID_SDK_ROOT briefcase build android --no-input
+          mkdir -p apk
+          find build -name "*.apk" -path "*outputs*" -exec cp {} apk/Bosun-Mobile-Android.apk \;
+          ls -l apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bosun-android
+          path: apk/Bosun-Mobile-Android.apk
+          if-no-files-found: error

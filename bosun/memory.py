@@ -31,7 +31,7 @@ class Memory:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Memory":
+    def from_dict(cls, data: dict) -> Memory:
         try:
             return cls(
                 channel=int(data["channel"]),
@@ -53,7 +53,7 @@ class MemoryBank:
     channels: dict[int, Memory] = field(default_factory=dict)
 
     @classmethod
-    def open(cls, model: str, path, **kw) -> "MemoryBank":
+    def open(cls, model: str, path, **kw) -> MemoryBank:
         bank = cls(model=model, path=pathlib.Path(path), **kw)
         bank.load()
         return bank
