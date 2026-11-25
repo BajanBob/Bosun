@@ -1,0 +1,11 @@
+{
+  "model": "IC-9700",
+  "baud": 19200,
+  "defaults": {"mode": "USB", "filter": "FIL2", "agc": "MID", "preamp": true,
+               "attenuator": false, "af_gain_pct": 40, "rf_gain_pct": 100},
+  "presets": {
+    "144-ssb": {"frequency": 144300000, "mode": "USB", "filter": "FIL2"},
+    "430-fm": {"frequency": 433500000, "mode": "FM", "filter": "FIL1"},
+    "1296-weak": {"frequency": 1296300000, "mode": "CW", "filter": "FIL3"}
+  }
+}

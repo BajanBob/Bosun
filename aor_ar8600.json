@@ -1,0 +1,11 @@
+{
+  "model": "AR-8600",
+  "baud": 9600,
+  "receive_only": true,
+  "defaults": {"mode": "NFM", "attenuator": false, "af_gain_pct": 45,
+               "squelch_pct": 15},
+  "presets": {
+    "airband": {"frequency": 121500000, "mode": "AM"},
+    "marine": {"frequency": 156800000, "mode": "NFM"}
+  }
+}

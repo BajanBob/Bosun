@@ -1,0 +1,55 @@
+name: Build desktop packages
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+            executable: Bosun.exe
+          - os: ubuntu-latest
+            name: linux
+            executable: bosun
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip pyinstaller .
+      - name: Build standalone executable
+        run: pyinstaller --clean --noconfirm --onefile --name ${{ matrix.executable == 'Bosun.exe' && 'Bosun' || 'bosun' }} --collect-all bosun packaging/entry.py
+      - name: Assemble Windows desktop package
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package | Out-Null
+          Copy-Item dist/Bosun.exe package/
+          Compress-Archive -Path dist/Bosun.exe -DestinationPath Bosun-Windows-x64.zip -Force
+          Copy-Item packaging/windows/Bosun-Desktop.bat package/
+          Copy-Item packaging/windows/README.txt package/
+          Compress-Archive -Path package/* -DestinationPath Bosun-Windows-Desktop.zip -Force
+      - name: Assemble Linux package
+        if: matrix.name == 'linux'
+        run: |
+          mkdir -p package
+          cp dist/bosun package/
+          cp packaging/linux/bosun-launcher.sh package/
+          chmod +x package/bosun package/bosun-launcher.sh
+          tar -czf Bosun-Linux-x86_64.tar.gz -C package .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Bosun-${{ matrix.name }}
+          path: |
+            Bosun-Windows-x64.zip
+            Bosun-Windows-Desktop.zip
+            Bosun-Linux-x86_64.tar.gz
+          if-no-files-found: ignore

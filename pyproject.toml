@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bosun"
+version = "0.2.0"
+description = "Radio control layer for the ARGUS-Q receiver family"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["radio", "cat", "civ", "sdr", "ham", "scanner"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Communications :: Ham Radio",
+  "Typing :: Typed",
+]
+dependencies = ["pyserial>=3.5", "numpy>=1.24"]
+
+[project.optional-dependencies]
+audio = ["sounddevice>=0.4.6"]
+soapy = ["SoapySDR"]
+rtl = ["pyrtlsdr"]
+airspy = ["airspy"]
+test = ["pytest>=7", "ruff>=0.5"]
+
+[project.scripts]
+bosun = "bosun.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["bosun*"]
+
+[tool.setuptools.package-data]
+bosun = ["profiles/*.json", "py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 90
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true

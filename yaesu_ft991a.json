@@ -1,0 +1,10 @@
+{
+  "model": "FT-991A",
+  "baud": 38400,
+  "defaults": {"mode": "USB", "filter_width": 10, "agc": 4, "preamp": true,
+               "attenuator": false, "af_gain_pct": 40, "rf_gain_pct": 100},
+  "presets": {
+    "20m-ssb": {"frequency": 14225000, "mode": "USB", "filter_width": 10},
+    "6m-fm": {"frequency": 52000000, "mode": "FM", "filter_width": 5}
+  }
+}
