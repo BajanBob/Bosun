@@ -8,7 +8,7 @@ on version tags (`v*`), and from Actions → Build Bosun Packages → Run workfl
 | `Bosun-windows` | `Bosun-Windows-x64.zip` | Portable: `Bosun.exe` (desktop app) + `bosun-cli.exe` |
 | `Bosun-windows` | `Bosun-Windows-Desktop-Setup.exe` | Installer: Start menu + desktop shortcut, per-user, no admin rights |
 | `Bosun-linux` | `Bosun-Linux-x86_64.zip` / `.tar.gz` | `Bosun` (desktop app), `bosun-cli`, `install.sh` adds it to the app menu |
-| `Bosun-android` | `Bosun-Mobile-Android.apk` | Bosun Mobile (debug-signed, sideload) |
+| `Bosun-android` | `Bosun-Mobile-Android.apk` | Bosun Mobile: radio control, RTL-SDR spectrum + signal detection (debug-signed, sideload) |
 
 ## What the desktop app does
 
@@ -37,8 +37,16 @@ on version tags (`v*`), and from Actions → Build Bosun Packages → Run workfl
   (install it with Zadig).
 - Linux: extract, then run `./install.sh`. USB serial needs the `dialout` group
   (`uucp` on Arch); RTL-SDR may need the `rtl-sdr` udev rules from your distro.
-- Android: network (TCP) radio control only; install by allowing "Install
-  unknown apps".
+- Android: install by allowing "Install unknown apps". Radio control is over
+  the network (TCP).
+- Android RTL-SDR: plug the dongle in with a USB OTG adapter and install the
+  free open-source "Rtl-sdr driver" app by Martin Marinov (`marto.rtl_tcp_andro`,
+  F-Droid or Play Store). In Bosun Mobile choose SDR > "RTL-SDR on this phone"
+  and Start; Bosun launches the driver, Android asks for USB permission, and
+  the spectrum, waterfall and signal list appear. Tap a signal to tune the
+  connected radio. "rtl_tcp on the network" reads a dongle on a PC or
+  Raspberry Pi running `rtl_tcp -a 0.0.0.0`.
+- Desktop rtl_tcp: type `rtl_tcp:host:port` as the spectrum source.
 - Barrett / Harris: Bosun does not guess their command sets. Copy the commands
   from the radio's remote-control (RS-232) manual into the wizard's command
   profile; it is saved in your settings folder under `radio_profiles`.

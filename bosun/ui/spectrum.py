@@ -16,7 +16,7 @@ from .. import chirp, dsp
 from ..cognitive import CognitiveReceiver, Sweeper
 from ..recorder import IQRecorder, SDRAudioRecorder, recordings_dir, stamp
 from ..render import SpectrumView
-from ..sources import DemoSource, list_sources, open_source
+from ..sources import RTL_TCP_DEFAULT, DemoSource, list_sources, open_source
 from .tips import tip
 
 PAD = 6
@@ -62,7 +62,8 @@ class SpectrumTab(ttk.Frame):
         settings = self.app.settings
         ttk.Label(bar, text="Source").pack(side="left")
         # SDR hardware is probed only on request (Find SDRs), never at startup.
-        known = [DEMO] + ([settings["sdr"]] if settings.get("sdr") not in (None, DEMO) else [])
+        known = [DEMO, RTL_TCP_DEFAULT] + (
+            [settings["sdr"]] if settings.get("sdr") not in (None, DEMO, RTL_TCP_DEFAULT) else [])
         self.src_name = tk.StringVar(value=settings.get("sdr") or DEMO)
         self.src_box = tip(ttk.Combobox(bar, textvariable=self.src_name, width=26,
                                         values=known), "source")
@@ -242,7 +243,10 @@ class SpectrumTab(ttk.Frame):
             if want != src.rate and opts["span"] != span_name:
                 span_name = opts["span"]
                 src.rate = want
-                if hasattr(src, "_dev") and src._dev is not None:
+                if hasattr(src, "set_rate"):
+                    with contextlib.suppress(Exception):
+                        src.set_rate(want)
+                elif hasattr(src, "_dev") and src._dev is not None:
                     with contextlib.suppress(Exception):
                         src._dev.set_sample_rate(want)
             try:

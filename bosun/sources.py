@@ -149,9 +149,147 @@ class SDRSource(IQSource):
         return np.concatenate(blocks)[:n] if blocks else np.zeros(n, np.complex64)
 
 
+RTL_TCP_DEFAULT = "rtl_tcp:127.0.0.1:1234"
+
+
+class RtlTcpSource(IQSource):
+    """RTL-SDR over the rtl_tcp protocol.
+
+    Works with rtl_tcp on a PC or Raspberry Pi, and on Android with the
+    "Rtl-sdr driver" app (marto.rtl_tcp_andro), which serves a USB dongle on
+    127.0.0.1. A reader thread drains the socket so reads are always fresh.
+    """
+
+    CMD_FREQ, CMD_RATE, CMD_GAIN_MODE, CMD_GAIN, CMD_AGC = 0x01, 0x02, 0x03, 0x04, 0x08
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 1234, center_hz: float = 100e6,
+                 rate: float = 1.024e6, gain_db: float | None = 30.0,
+                 connect_timeout: float = 5.0) -> None:
+        self.host, self.port = host, int(port)
+        self.center_hz, self.rate, self.gain = center_hz, rate, gain_db
+        self.timeout = connect_timeout
+        self.name = f"rtl_tcp:{host}:{port}"
+        self.min_hz, self.max_hz = 24e6, 1766e6
+        self.tuner = 0
+        self._sock = None
+        self._buf = np.zeros(0, np.complex64)
+        self._keep = int(rate)  # about one second of samples
+        self._lock = threading.Lock()
+        self._alive = False
+        self._thread: threading.Thread | None = None
+
+    def _cmd(self, cmd: int, value: int) -> None:
+        import struct
+
+        if self._sock is None:
+            raise SDRUnavailable("rtl_tcp not connected")
+        self._sock.sendall(struct.pack(">BI", cmd, int(value) & 0xFFFFFFFF))
+
+    def open(self) -> None:
+        import socket
+        import struct
+
+        try:
+            sock = socket.create_connection((self.host, self.port), self.timeout)
+        except OSError as exc:
+            raise SDRUnavailable(f"cannot reach rtl_tcp at {self.host}:{self.port}: {exc}"
+                                 ) from exc
+        sock.settimeout(self.timeout)
+        header = b""
+        try:
+            while len(header) < 12:
+                chunk = sock.recv(12 - len(header))
+                if not chunk:
+                    break
+                header += chunk
+        except OSError:
+            pass
+        if len(header) < 12 or not header.startswith(b"RTL"):
+            sock.close()
+            raise SDRUnavailable(f"{self.host}:{self.port} is not an rtl_tcp server")
+        self.tuner = struct.unpack(">I", header[4:8])[0]
+        self._sock = sock
+        self._cmd(self.CMD_RATE, self.rate)
+        self._cmd(self.CMD_FREQ, self.center_hz)
+        self.set_gain(self.gain)
+        sock.settimeout(1.0)
+        self._alive = True
+        self._thread = threading.Thread(target=self._reader, daemon=True, name="rtl_tcp")
+        self._thread.start()
+
+    def _reader(self) -> None:
+        pending = b""
+        while self._alive:
+            try:
+                chunk = self._sock.recv(262144)
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            if not chunk:
+                break
+            data = pending + chunk
+            usable = len(data) & ~1
+            pending = data[usable:]
+            raw = np.frombuffer(data[:usable], dtype=np.uint8).astype(np.float32)
+            iq = ((raw[0::2] - 127.4) + 1j * (raw[1::2] - 127.4)) / 128.0
+            with self._lock:
+                self._buf = np.concatenate([self._buf, iq.astype(np.complex64)])[-self._keep:]
+        self._alive = False
+
+    def close(self) -> None:
+        self._alive = False
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            finally:
+                self._sock = None
+        if self._thread is not None:
+            self._thread.join(2)
+
+    def tune(self, hz: float) -> None:
+        self.center_hz = float(hz)
+        self._cmd(self.CMD_FREQ, self.center_hz)
+        with self._lock:
+            self._buf = self._buf[:0]  # drop samples from the old frequency
+
+    def set_gain(self, db: float | None) -> None:
+        self.gain = db
+        if db is None:
+            self._cmd(self.CMD_GAIN_MODE, 0)  # automatic
+        else:
+            self._cmd(self.CMD_GAIN_MODE, 1)
+            self._cmd(self.CMD_GAIN, round(float(db) * 10))
+
+    def set_rate(self, rate: float) -> None:
+        self.rate = float(rate)
+        self._keep = int(rate)
+        self._cmd(self.CMD_RATE, self.rate)
+
+    def read(self, n: int, timeout: float = 3.0) -> np.ndarray:
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                if len(self._buf) >= n:
+                    out = self._buf[-n:].copy()
+                    self._buf = self._buf[:0]
+                    return out
+            if not self._alive:
+                raise SDRUnavailable("rtl_tcp connection closed")
+            if time.monotonic() > deadline:
+                raise SDRUnavailable("no samples from rtl_tcp (is the dongle plugged in?)")
+            time.sleep(0.01)
+
+
+def parse_rtl_tcp(name: str) -> tuple[str, int]:
+    rest = name.split(":", 1)[1] if name.startswith("rtl_tcp") else name
+    host, _, port = rest.rpartition(":")
+    return (host or "127.0.0.1"), int(port or 1234)
+
+
 def list_sources() -> list[str]:
     """Names for the source picker: the demo plus any SDRs found."""
-    names = [DemoSource.name]
+    names = [DemoSource.name, RTL_TCP_DEFAULT]
     try:
         from .sdr import available
 
@@ -168,6 +306,9 @@ def open_source(name: str, center_hz: float, rate: float = DEFAULT_RATE,
                 gain_db: float = 30.0) -> IQSource:
     if name == DemoSource.name or not name:
         src: IQSource = DemoSource(center_hz, rate)
+    elif name.startswith("rtl_tcp"):
+        host, port = parse_rtl_tcp(name)
+        src = RtlTcpSource(host, port, center_hz, min(rate, 2.4e6), gain_db)
     else:
         src = SDRSource(name, center_hz, rate, gain_db)
     src.open()

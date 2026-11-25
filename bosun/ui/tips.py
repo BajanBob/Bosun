@@ -38,8 +38,9 @@ TIPS = {
     "scan_go": "Start or stop scanning with the radio. Needs a radio that can report squelch.",
     "hits": "Frequencies where the squelch opened. Double-click one to tune to it.",
     # spectrum
-    "source": "Where the spectrum comes from: an RTL-SDR or other SDR, or the Demo, which "
-              "simulates a busy band so you can try everything without hardware.",
+    "source": "Where the spectrum comes from: an RTL-SDR or other SDR, an rtl_tcp server "
+              "(type rtl_tcp:host:port, e.g. a Raspberry Pi running rtl_tcp), or the Demo, "
+              "which simulates a busy band so you can try everything without hardware.",
     "find_sdrs": "Search for plugged-in SDRs (RTL-SDR, SoapySDR devices, Airspy).",
     "center": "Centre of the view in MHz. Double-click the waterfall to re-centre there.",
     "span": "How wide a slice to show. Narrower spans show more detail (and tell AM from FM).",
