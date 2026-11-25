@@ -46,6 +46,9 @@ class SpectrumTab(ttk.Frame):
         self.selected_hz: float | None = None
         self.iq_rec = None
         self.audio_rec = None
+        # Other features (SSTV, listening) can tap the live IQ: objects with
+        # .write(iq) and attributes center_hz/rate kept current by us.
+        self.iq_taps: list = []
         self._photo = None
         self._sweeping = False
         self._sweep_result = None
@@ -279,16 +282,24 @@ class SpectrumTab(ttk.Frame):
                 elif hasattr(src, "_dev") and src._dev is not None:
                     with contextlib.suppress(Exception):
                         src._dev.set_sample_rate(want)
+            # Listening, decoding or recording needs an unbroken stream: read
+            # ~0.1 s blocks continuously. The display only needs snapshots.
+            continuous = bool(self.iq_taps or self.iq_rec or self.audio_rec)
             try:
-                iq = src.read(NFFT * 8)
+                if continuous and hasattr(src, "read_all"):
+                    iq = src.read_all(NFFT * 8)
+                elif continuous:
+                    iq = src.read(max(NFFT * 8, int(src.rate * 0.1) // NFFT * NFFT))
+                else:
+                    iq = src.read(NFFT * 8)
             except Exception as exc:
                 self.app.post(self.app.say, f"SDR read failed: {exc}")
                 break
-            for rec in (self.iq_rec, self.audio_rec):
+            for rec in (self.iq_rec, self.audio_rec, *self.iq_taps):
                 if rec is not None:
                     with contextlib.suppress(Exception):
                         rec.write(iq)
-            off, p = dsp.psd(iq, src.rate, NFFT)
+            off, p = dsp.psd(iq[-NFFT * 8:], src.rate, NFFT)
             dets = []
             floor = None
             if opts["auto"]:
@@ -301,7 +312,7 @@ class SpectrumTab(ttk.Frame):
                                       threshold_db=12 - 8 * opts["sens"])
             with contextlib.suppress(queue.Full):
                 self.frames.put_nowait((off + src.center_hz, p, dets, floor))
-            if src.name.startswith("Demo"):
+            if src.name.startswith("Demo") and not continuous:
                 time.sleep(0.05)
 
     def _run_wide(self, src, span: float, opts: dict) -> None:

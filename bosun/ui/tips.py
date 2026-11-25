@@ -79,6 +79,10 @@ TIPS = {
                 "device, or line-in / mic-in from its speaker or data jack.",
     "audio_rec": "Start or stop recording that input to a WAV file in 'Bosun Recordings'.",
     "open_folder": "Open the folder where recordings and captures are saved.",
+    "pic_source": "Where the SSTV audio comes from: your radio's sound output (USB audio "
+                  "or line-in), the signal you clicked on the Spectrum tab, or a recording.",
+    "pic_start": "Start listening. Bosun spots the start of each picture by itself and "
+                 "saves it when complete.",
     # devices
     "probe": "List serial ports, known USB-serial cables, sound devices and SDRs.",
 }

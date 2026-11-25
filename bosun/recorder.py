@@ -82,17 +82,25 @@ def _lowpass(cutoff: float, rate: float, taps: int = 129) -> np.ndarray:
 
 
 class Demodulator:
-    """Shift a signal to baseband, filter, demodulate and resample to 48 kHz."""
+    """Shift a signal to baseband, filter, demodulate and resample to 48 kHz.
+
+    Two stages keep it fast at SDR rates: a cheap block average first brings
+    the rate down to a few hundred kHz, then a proper low-pass filter.
+    """
 
     def __init__(self, rate: float, offset_hz: float, mode: str = "FM",
                  bandwidth_hz: float | None = None) -> None:
         self.rate, self.offset, self.mode = rate, offset_hz, mode.upper()
         bw = bandwidth_hz or {"WFM": 200e3, "FM": 12.5e3, "NFM": 12.5e3, "AM": 8e3,
                               "USB": 3e3, "LSB": 3e3, "CW": 800}.get(self.mode, 12.5e3)
-        self.decim = max(1, int(rate // max(bw * 2, AUDIO_RATE)))
-        self.mid_rate = rate / self.decim
-        self.taps = _lowpass(bw / 2, rate)
+        self.d1 = max(1, int(rate // max(bw * 8, 192_000)))
+        self.rate1 = rate / self.d1
+        self.decim = max(1, int(self.rate1 // max(bw * 2, AUDIO_RATE)))
+        self.mid_rate = self.rate1 / self.decim
+        self.taps = _lowpass(bw / 2, self.rate1)
         self._n = 0
+        self._rem = np.zeros(0, np.complex64)
+        self._phase = 0
         self._prev = np.complex64(1)
         self._zi = np.zeros(len(self.taps) - 1, np.complex64)
 
@@ -101,10 +109,17 @@ class Demodulator:
         n = np.arange(self._n, self._n + len(iq))
         self._n += len(iq)
         shifted = iq * np.exp(-2j * np.pi * self.offset * n / self.rate).astype(np.complex64)
+        if self.d1 > 1:
+            shifted = np.concatenate([self._rem, shifted])
+            full = len(shifted) // self.d1 * self.d1
+            self._rem = shifted[full:]
+            shifted = shifted[:full].reshape(-1, self.d1).mean(axis=1)
         buf = np.concatenate([self._zi, shifted])
         filt = np.convolve(buf, self.taps, mode="valid")
         self._zi = buf[-(len(self.taps) - 1):]
-        base = filt[:: self.decim]
+        start = (-self._phase) % self.decim  # keep decimation phase across calls
+        base = filt[start:: self.decim]
+        self._phase = (self._phase + len(filt)) % self.decim
         if self.mode in ("FM", "NFM", "WFM"):
             prev = np.concatenate([[self._prev], base[:-1]])
             audio = np.angle(base * np.conj(prev)).astype(np.float32)
@@ -112,15 +127,21 @@ class Demodulator:
                 self._prev = base[-1]
         elif self.mode == "AM":
             env = np.abs(base)
-            audio = (env - np.mean(env)).astype(np.float32)
+            audio = (env - np.mean(env)).astype(np.float32) if len(env) else env
         else:  # USB/LSB/CW: product detector at baseband
             audio = (base.real if self.mode != "LSB" else -base.imag).astype(np.float32)
-        # Resample to 48 kHz by linear interpolation.
         if not len(audio):
-            return audio
-        count = int(len(audio) * AUDIO_RATE / self.mid_rate)
-        x = np.linspace(0, len(audio) - 1, max(count, 1))
-        return np.interp(x, np.arange(len(audio)), audio).astype(np.float32)
+            return audio.astype(np.float32)
+        # Resample to 48 kHz by linear interpolation (continuous across calls).
+        if not hasattr(self, "_rs_pos"):
+            self._rs_pos, self._rs_last = 0.0, float(audio[0])
+        step = self.mid_rate / AUDIO_RATE
+        ext = np.concatenate([[self._rs_last], audio])
+        pos = np.arange(self._rs_pos, len(audio), step)
+        out = np.interp(pos, np.arange(len(ext)), ext)
+        self._rs_pos = (pos[-1] + step - len(audio)) if len(pos) else self._rs_pos - len(audio)
+        self._rs_last = float(audio[-1])
+        return out.astype(np.float32)
 
 
 class WavWriter:

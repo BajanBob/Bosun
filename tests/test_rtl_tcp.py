@@ -60,6 +60,13 @@ def server():
     s.stop = True
 
 
+def wait_for(cond, timeout=5.0):
+    end = time.time() + timeout
+    while time.time() < end and not cond():
+        time.sleep(0.02)
+    return cond()
+
+
 def test_parse_spec():
     assert parse_rtl_tcp("rtl_tcp:10.0.0.2:1234") == ("10.0.0.2", 1234)
     assert parse_rtl_tcp("rtl_tcp:127.0.0.1:7000") == ("127.0.0.1", 7000)
@@ -68,19 +75,16 @@ def test_parse_spec():
 def test_streams_and_detects(server):
     src = open_source(f"rtl_tcp:127.0.0.1:{server.port}", 145.6e6, 1.024e6, 20)
     try:
-        time.sleep(0.3)
-        assert (2, 1_024_000) in server.commands and (1, 145_600_000) in server.commands
-        assert (4, 200) in server.commands  # 20 dB in tenths
+        assert wait_for(lambda: {(2, 1_024_000), (1, 145_600_000), (4, 200)}
+                        <= set(server.commands))  # rate, frequency, 20 dB in tenths
         iq = src.read(16384)
         off, p = dsp.psd(iq, src.rate)
         found = dsp.detect(off, p, src.center_hz)
         assert any(abs(d.center_hz - 145.8e6) < 5e3 for d in found)
         src.tune(146.0e6)
-        time.sleep(0.1)
-        assert (1, 146_000_000) in server.commands
+        assert wait_for(lambda: (1, 146_000_000) in server.commands)
         src.set_gain(None)
-        time.sleep(0.05)
-        assert (3, 0) in server.commands
+        assert wait_for(lambda: (3, 0) in server.commands)
     finally:
         src.close()
 

@@ -84,6 +84,9 @@ class BosunApp(ttk.Frame):
         from .ui.audio import AudioTab
         self.audio_tab = AudioTab(self.nb, self)
         self.nb.add(self.audio_tab, text="Audio")
+        from .ui.pictures import PicturesTab
+        self.pictures = PicturesTab(self.nb, self)
+        self.nb.add(self.pictures, text="Pictures")
         self.nb.add(self._build_devices(self.nb), text="Devices")
         self.nb.add(self._build_catalogue(self.nb), text="Radios")
         self.message = tk.StringVar(value="Not connected.")
@@ -672,6 +675,7 @@ class BosunApp(ttk.Frame):
             if self.spectrum is not None:
                 self.spectrum.shutdown()
             self.audio_tab.shutdown()
+            self.pictures.shutdown()
             self.ctl.disconnect()
         finally:
             self.root.destroy()

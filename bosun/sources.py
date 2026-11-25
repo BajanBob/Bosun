@@ -52,8 +52,27 @@ class DemoSource(IQSource):
             (100.1e6, 0.2, "wfm", True),                        # FM broadcast
             (121.500e6, 0.04, "am", (now % 7) < 4),             # airband
             (14.074e6, 0.01, "narrow", True),                   # FT8-ish
+            (145.900e6, 0.03, "sstv", True),                    # SSTV picture loop
             (7.100e6, 0.03, "ssb", (now % 5) < 3),
         ]
+
+    _sstv_audio: np.ndarray | None = None
+
+    @classmethod
+    def sstv_audio(cls) -> np.ndarray:
+        """A Robot 36 test picture followed by 8 s of silence, made once."""
+        if cls._sstv_audio is None:
+            from .sstv import BY_NAME, encode
+
+            img = np.zeros((240, 320, 3), np.uint8)
+            cols = [(255, 255, 255), (212, 175, 55), (46, 204, 113), (15, 81, 50),
+                    (200, 40, 40), (40, 90, 200), (120, 120, 120), (0, 0, 0)]
+            for i, c in enumerate(cols):
+                img[:150, i * 40:(i + 1) * 40] = c
+            img[150:] = np.linspace(0, 255, 320)[None, :, None].astype(np.uint8)
+            cls._sstv_audio = np.concatenate([encode(img, BY_NAME["Robot 36"]),
+                                              np.zeros(48000 * 8, np.float32)])
+        return cls._sstv_audio
 
     def _voice(self, n: int, bw_hz: float) -> np.ndarray:
         """Band-limited random 'audio', -1..1."""
@@ -80,6 +99,15 @@ class DemoSource(IQSource):
                 audio = self._voice(n, 3_000 if kind == "fm" else 15_000)
                 phase = 2 * np.pi * dev * np.cumsum(audio) / self.rate
                 sig = np.exp(1j * (carrier + phase))
+            elif kind == "sstv":
+                audio = self.sstv_audio()
+                pos = (t * 48000) % len(audio)
+                tone = np.interp(pos, np.arange(len(audio)), audio)
+                # FM, 3 kHz deviation; phase kept continuous between reads
+                inc = 2 * np.pi * (off + 3000 * tone) / self.rate
+                ph = getattr(self, "_sstv_phase", 0.0) + np.cumsum(inc)
+                self._sstv_phase = float(ph[-1] % (2 * np.pi))
+                sig = np.exp(1j * ph)
             elif kind == "am":
                 sig = (1 + 0.5 * self._voice(n, 3_000)) * np.exp(1j * carrier)
             elif kind == "ssb":
@@ -184,7 +212,7 @@ class RtlTcpSource(IQSource):
         self.tuner = 0
         self._sock = None
         self._buf = np.zeros(0, np.complex64)
-        self._keep = int(rate)  # about one second of samples
+        self._keep = int(rate) * 2  # about two seconds of samples
         self._lock = threading.Lock()
         self._alive = False
         self._thread: threading.Thread | None = None
@@ -274,8 +302,23 @@ class RtlTcpSource(IQSource):
 
     def set_rate(self, rate: float) -> None:
         self.rate = float(rate)
-        self._keep = int(rate)
+        self._keep = int(rate) * 2
         self._cmd(self.CMD_RATE, self.rate)
+
+    def read_all(self, min_n: int, timeout: float = 3.0) -> np.ndarray:
+        """Every sample received since the last read (at least min_n): an
+        unbroken stream for audio and decoders."""
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                if len(self._buf) >= min_n:
+                    out, self._buf = self._buf, self._buf[:0]
+                    return out
+            if not self._alive:
+                raise SDRUnavailable("rtl_tcp connection closed")
+            if time.monotonic() > deadline:
+                raise SDRUnavailable("no samples from rtl_tcp (is the dongle plugged in?)")
+            time.sleep(0.005)
 
     def read(self, n: int, timeout: float = 3.0) -> np.ndarray:
         deadline = time.monotonic() + timeout
