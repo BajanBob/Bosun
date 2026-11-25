@@ -56,6 +56,8 @@ Library:
 
 ## Downloads
 
+**[Latest release: Windows, Linux and Android downloads](https://github.com/BajanBob/Bosun/releases/latest)**
+
 Ready-built Windows, Linux and Android packages come from GitHub Actions; see
 [BUILD-PACKAGES.md](BUILD-PACKAGES.md). Requires Python 3.11+ when installing
 from source.

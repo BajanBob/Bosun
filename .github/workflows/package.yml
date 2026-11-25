@@ -156,3 +156,37 @@ jobs:
           name: Bosun-android
           path: apk/Bosun-Mobile-Android.apk
           if-no-files-found: error
+
+  release:
+    # On a version tag (v*), publish every package as a GitHub Release with
+    # direct download links: https://github.com/BajanBob/Bosun/releases/latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List files
+        run: ls -l dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Bosun ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            **Downloads**
+            - Windows installer: `Bosun-Windows-Desktop-Setup.exe` (Start menu + desktop shortcut)
+            - Windows portable: `Bosun-Windows-x64.zip` (extract the whole Bosun folder)
+            - Linux: `Bosun-Linux-x86_64.zip` or `.tar.gz` (run `./install.sh`)
+            - Android: `Bosun-Mobile-Android.apk` (allow "Install unknown apps")
+
+            Builds are not code-signed: Windows SmartScreen may ask you to confirm ("More info" > "Run anyway").
+          files: dist/*
+          fail_on_unmatched_files: true

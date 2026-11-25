@@ -1,5 +1,8 @@
 # Bosun packages
 
+**Download:** https://github.com/BajanBob/Bosun/releases/latest
+(direct links to the Windows installer, Windows zip, Linux zip and Android APK).
+
 `.github/workflows/package.yml` builds every package on each push to `main`,
 on version tags (`v*`), and from Actions → Build Bosun Packages → Run workflow.
 
