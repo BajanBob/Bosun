@@ -19,6 +19,8 @@ TIPS = {
     "host": "IP address or name of the network adapter attached to the radio.",
     "tcp_port": "TCP port number set on the network adapter (often 4000-4532).",
     "connect": "Open the link to the radio and read its frequency and mode.",
+    "detect": "Plug the radio in, switch it on, then press this: Bosun asks every serial "
+              "port who is there (Icom, Yaesu, Kenwood) and fills everything in.",
     # control
     "freq": "Type a frequency in MHz, e.g. 145.500 or 7.1. Press Enter or Tune.",
     "mode": "Demodulation mode: FM for two-way radio, AM for airband, USB/LSB for HF voice, "

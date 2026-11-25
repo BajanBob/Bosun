@@ -61,12 +61,16 @@ class BosunApp(ttk.Frame):
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=1)
 
+        from .ui.banner import Banner
+        self.banner = Banner(self)
+        self.banner.grid(row=0, column=0, sticky="ew", pady=(0, PAD))
+        self.banner.hide()
         self._build_menu()
         self._build_connection()
         self.nb = ttk.Notebook(self)
-        self.nb.grid(row=1, column=0, sticky="nsew", pady=(PAD, 0))
+        self.nb.grid(row=2, column=0, sticky="nsew", pady=(PAD, 0))
         self.nb.add(self._build_control(self.nb), text="Control")
         try:
             from .ui.spectrum import SpectrumTab
@@ -84,10 +88,13 @@ class BosunApp(ttk.Frame):
         self.nb.add(self._build_catalogue(self.nb), text="Radios")
         self.message = tk.StringVar(value="Not connected.")
         ttk.Label(self, textvariable=self.message, anchor="w").grid(
-            row=2, column=0, sticky="ew", pady=(PAD, 0))
+            row=3, column=0, sticky="ew", pady=(PAD, 0))
         self._refresh_ports()
         self._apply_settings()
         self.after(50, self._drain)
+        self.watcher = None
+        if self.settings.get("auto_detect", True):
+            self.after(500, self.start_watching)
         if first_run_wizard and not self.settings.get("setup_done"):
             self.after(300, self.open_wizard)
 
@@ -96,6 +103,7 @@ class BosunApp(ttk.Frame):
         bar = tk.Menu(self.root)
         setup = tk.Menu(bar, tearoff=False)
         setup.add_command(label="Setup wizard...", command=self.open_wizard)
+        setup.add_command(label="Detect my radio now", command=self.detect_now)
         setup.add_command(label="Open recordings folder", command=self._open_recordings)
         setup.add_separator()
         setup.add_command(label="Quit", command=self.quit_app)
@@ -104,6 +112,9 @@ class BosunApp(ttk.Frame):
         self.tips_var = tk.BooleanVar(value=Tooltip.enabled)
         helpm.add_checkbutton(label="Show hover tips", variable=self.tips_var,
                               command=self._toggle_tips)
+        self.watch_var = tk.BooleanVar(value=self.settings.get("auto_detect", True))
+        helpm.add_checkbutton(label="Watch for plugged-in radios and SDRs",
+                              variable=self.watch_var, command=self._toggle_watch)
         helpm.add_command(label="About Bosun", command=lambda: self.say(
             f"Bosun {__version__}: radio control, spectrum, detection and recording. "
             "MIT licence."))
@@ -112,7 +123,7 @@ class BosunApp(ttk.Frame):
 
     def _build_connection(self) -> None:
         box = ttk.LabelFrame(self, text="Connection", padding=PAD)
-        box.grid(row=0, column=0, sticky="ew")
+        box.grid(row=1, column=0, sticky="ew")
         for c in (1, 3):
             box.columnconfigure(c, weight=1)
 
@@ -342,6 +353,153 @@ class BosunApp(ttk.Frame):
         from .recorder import recordings_dir
         open_folder(recordings_dir())
 
+    # ---------- automatic device detection ----------
+    def start_watching(self) -> None:
+        from .detect import DeviceWatcher
+
+        if self.watcher is not None:
+            return
+        self.watcher = DeviceWatcher(
+            on_port_added=lambda info: self.post(self._port_added, info),
+            on_port_removed=lambda info: self.post(self._port_removed, info),
+            on_sdr_added=lambda name: self.post(self._sdr_added, name),
+            on_sdr_removed=lambda name: self.post(self._sdr_removed, name))
+        threading.Thread(target=self.watcher.start, daemon=True, name="watch-start").start()
+
+    def stop_watching(self) -> None:
+        if self.watcher is not None:
+            self.watcher.stop()
+            self.watcher = None
+
+    def _toggle_watch(self) -> None:
+        on = bool(self.watch_var.get())
+        (self.start_watching if on else self.stop_watching)()
+        with contextlib.suppress(Exception):
+            config.save_settings({"auto_detect": on})
+        self.say("Watching for new devices." if on else "Device watching is off.")
+
+    def _port_added(self, info) -> None:
+        self._refresh_ports()
+        if info.is_programming_cable:
+            self.banner.show(
+                f"A programming cable was plugged in on {info.label()}. Radios that use "
+                "these (e.g. Radtel RT-950 Pro, Baofeng) have no live computer control: "
+                "use the Audio tab to record them and save channel lists for CHIRP.",
+                [("Open Audio tab", lambda: self.nb.select(self.audio_tab))], kind="warn")
+            return
+        if self.ctl.connected:
+            self.banner.show(f"New device on {info.label()}. Disconnect first to use it.",
+                             [("Use this port", lambda: self.port.set(info.device))])
+            return
+        self.banner.show(f"New device on {info.label()}. Checking whether it is a radio...")
+        self._identify(info)
+
+    def _identify(self, info) -> None:
+        from .detect import identify
+
+        def done(hit):
+            if hit is None:
+                self.port.set(info.device)
+                self.banner.show(
+                    f"{info.label()} did not answer as a radio. If it is your radio, turn "
+                    "on CAT / CI-V (USB) in the radio's menu and switch it on, then try "
+                    "again. It may also be another kind of device.",
+                    [("Try again", lambda: self._port_added(info)),
+                     ("Use this port anyway", lambda: self.port.set(info.device))],
+                    kind="warn")
+                return
+            self.banner.show(
+                f"Found {registry.get(hit.model).vendor} {hit.model} on {hit.port} at "
+                f"{hit.baud} baud ({hit.detail}).",
+                [("Connect", lambda: self._use_detected(hit, connect=True)),
+                 ("Just select it", lambda: self._use_detected(hit, connect=False))],
+                kind="ok")
+
+        self._bg(identify, info.device, done=done,
+                 fail=lambda exc: self.banner.show(f"Could not check {info.device}: {exc}",
+                                                   kind="warn"))
+
+    def _use_detected(self, hit, connect: bool) -> None:
+        self.banner.hide()
+        self.model.set(hit.model)
+        self._model_changed()
+        self.link.set("serial")
+        self._link_changed()
+        self.port.set(hit.port)
+        self.baud.set(str(hit.baud))
+        with contextlib.suppress(Exception):
+            config.save_settings({"model": hit.model, "port": hit.port, "baud": hit.baud,
+                                  "tcp": None, "setup_done": True})
+        if connect and not self.ctl.connected:
+            self._toggle_connect()
+
+    def _port_removed(self, info) -> None:
+        self._refresh_ports()
+        radio_port = getattr(getattr(self.ctl.radio, "_t", None), "port", None)
+        if self.ctl.connected and radio_port == info.device:
+            self._bg(self.ctl.disconnect,
+                     done=lambda _r: (self.connect_btn.configure(text="Connect"),
+                                      self._set_text(self.status, "")))
+            self.banner.show(f"The radio on {info.device} was unplugged or switched off. "
+                             "Bosun disconnected it.", kind="warn")
+
+    def _sdr_added(self, name: str) -> None:
+        if self.spectrum is None:
+            return
+        self.spectrum.find_sdrs()
+
+        def show():
+            self.banner.hide()
+            self.spectrum.src_name.set(name)
+            self.nb.select(self.spectrum)
+            if self.spectrum._worker is not None:
+                self.spectrum.stop()
+            self.spectrum.toggle()
+
+        self.banner.show(f"SDR plugged in: {name}.", [("Show spectrum", show)], kind="ok")
+
+    def _sdr_removed(self, name: str) -> None:
+        if self.spectrum is None:
+            return
+        self.spectrum.find_sdrs()
+        src = self.spectrum.source
+        if src is not None and getattr(src, "name", "") == name:
+            self.spectrum.stop()
+            self.banner.show(f"SDR {name} was unplugged; the spectrum stopped.", kind="warn")
+
+    def detect_now(self) -> None:
+        from .detect import scan_all
+
+        if self.ctl.connected:
+            self.banner.show("Disconnect first, then run Detect my radio.", kind="warn")
+            return
+        self.banner.show("Looking for radios on every serial port (this can take a few "
+                         "seconds per port)...")
+
+        def done(hits):
+            if not hits:
+                self.banner.show(
+                    "No radio answered. Check the USB cable, switch the radio on, and turn "
+                    "on CAT / CI-V (USB) in its menu. Radios with no PC control (e.g. "
+                    "Radtel) cannot be detected.", kind="warn")
+                return
+            hit = hits[0]
+            more = f" (and {len(hits) - 1} more)" if len(hits) > 1 else ""
+            self.banner.show(
+                f"Found {hit.model} on {hit.port} at {hit.baud} baud{more}.",
+                [("Connect", lambda: self._use_detected(hit, connect=True)),
+                 ("Just select it", lambda: self._use_detected(hit, connect=False))],
+                kind="ok")
+
+        if self.watcher is not None:
+            self.watcher.paused = True
+
+        def resume(*_):
+            if self.watcher is not None:
+                self.watcher.paused = False
+
+        self._bg(scan_all, done=lambda hits: (resume(), done(hits)), fail=resume)
+
     # ---------- handlers ----------
     def _model_changed(self, _event=None) -> None:
         if not hasattr(self, "mode_box"):
@@ -485,6 +643,7 @@ class BosunApp(ttk.Frame):
 
     def quit_app(self) -> None:
         try:
+            self.stop_watching()
             if self.spectrum is not None:
                 self.spectrum.shutdown()
             self.audio_tab.shutdown()

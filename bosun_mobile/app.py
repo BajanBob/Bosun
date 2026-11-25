@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 
 import toga
@@ -26,13 +27,16 @@ class BosunMobile(toga.App):
     def startup(self) -> None:
         self.ctl = Controller()
         self.main_window = toga.MainWindow(title=f"Bosun {__version__}")
-        self.main_window.content = toga.OptionContainer(content=[
+        self.tabs = toga.OptionContainer(content=[
             ("Radio", toga.ScrollContainer(content=self._radio_tab(), horizontal=False)),
             ("SDR", toga.ScrollContainer(content=self._sdr_tab(), horizontal=False)),
             ("Scan", toga.ScrollContainer(content=self._scan_tab(), horizontal=False)),
             ("Radios", self._catalogue_tab()),
         ])
+        self.main_window.content = self.tabs
         self.main_window.show()
+        self._known_dongles: list[str] = []
+        asyncio.ensure_future(self._watch_usb())
 
     # ---------- layout ----------
     def _radio_tab(self) -> toga.Box:
@@ -127,6 +131,45 @@ class BosunMobile(toga.App):
                        style=Pack(margin_top=GAP)),
             self.sdr_table,
         ])
+
+    async def _watch_usb(self) -> None:
+        """Offer the spectrum when an RTL-SDR is plugged into the phone."""
+        from . import android_sdr
+
+        if not android_sdr.on_android():
+            return
+        try:
+            self._known_dongles = await self._run(android_sdr.rtl_dongles, self)
+        except Exception:
+            return
+        while True:
+            await asyncio.sleep(2.0)
+            try:
+                now = await self._run(android_sdr.rtl_dongles, self)
+            except Exception:
+                continue
+            new = [d for d in now if d not in self._known_dongles]
+            gone = [d for d in self._known_dongles if d not in now]
+            self._known_dongles = now
+            if gone and self.sdr_source is not None and \
+                    str(self.sdr_kind.value).startswith("RTL-SDR on this phone"):
+                await self._sdr_stop()
+                self.sdr_info.text = "The RTL-SDR was unplugged; the spectrum stopped."
+            if new and self.sdr_source is None:
+                await self._offer_dongle(new[0])
+
+    async def _offer_dongle(self, name: str) -> None:
+        self.sdr_info.text = f"RTL-SDR plugged in: {name}."
+        try:
+            yes = await self.main_window.dialog(toga.QuestionDialog(
+                "RTL-SDR plugged in", f"{name} was plugged in. Show the live spectrum?"))
+        except Exception:
+            yes = False
+        if yes:
+            self.sdr_kind.value = "RTL-SDR on this phone (USB OTG)"
+            with contextlib.suppress(Exception):
+                self.tabs.current_tab = "SDR"
+            await self._sdr_toggle(self.sdr_btn)
 
     def _sdr_rate_hz(self) -> float:
         return {"1.024 MHz": 1.024e6, "2.048 MHz": 2.048e6,

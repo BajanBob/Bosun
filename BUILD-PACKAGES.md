@@ -28,6 +28,13 @@ on version tags (`v*`), and from Actions → Build Bosun Packages → Run workfl
 - **Recording**: IQ (SigMF), demodulated audio (WAV), radio audio from any sound
   input (WAV), spectrum screen captures (PNG). Saved in `Bosun Recordings` in
   your home folder.
+- **Automatic device detection**: plug a radio in and Bosun asks the new port
+  who is there (Yaesu / Kenwood `ID;`, Icom CI-V at each known address, at the
+  usual baud rates), then offers to connect. Unplugging disconnects cleanly.
+  A newly plugged-in SDR gets a "Show spectrum" offer. Programming cables
+  (CH340 / Prolific, e.g. Radtel) are recognised and pointed to the Audio tab.
+  Also Setup > Detect my radio now, and "Detect my radio" in the wizard.
+  Turn off under Help > Watch for plugged-in radios and SDRs.
 - **Hover tips** on every control (Help → Show hover tips to switch off).
 
 ## Notes
@@ -43,7 +50,8 @@ on version tags (`v*`), and from Actions → Build Bosun Packages → Run workfl
   free open-source "Rtl-sdr driver" app by Martin Marinov (`marto.rtl_tcp_andro`,
   F-Droid or Play Store). In Bosun Mobile choose SDR > "RTL-SDR on this phone"
   and Start; Bosun launches the driver, Android asks for USB permission, and
-  the spectrum, waterfall and signal list appear. Tap a signal to tune the
+  the spectrum, waterfall and signal list appear. Bosun Mobile also notices
+  when a dongle is plugged in and offers to start the spectrum. Tap a signal to tune the
   connected radio. "rtl_tcp on the network" reads a dongle on a PC or
   Raspberry Pi running `rtl_tcp -a 0.0.0.0`.
 - Desktop rtl_tcp: type `rtl_tcp:host:port` as the spectrum source.

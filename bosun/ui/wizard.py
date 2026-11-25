@@ -173,6 +173,44 @@ class SetupWizard(tk.Toplevel):
 
         vlist.bind("<<ListboxSelect>>", show_models)
         mlist.bind("<<ListboxSelect>>", show_info)
+
+        def detect():
+            from ..detect import scan_all
+
+            info.configure(text="Looking for your radio on every serial port...")
+            box: list = []
+            threading.Thread(target=lambda: box.append(scan_all()), daemon=True,
+                             name="wizard-detect").start()
+
+            def poll():
+                if not self.winfo_exists():
+                    return
+                if not box:
+                    self.after(200, poll)
+                    return
+                if not box[0]:
+                    info.configure(text="No radio answered. Switch it on, plug in the USB "
+                                        "cable and turn on CAT / CI-V in its menu, or pick "
+                                        "it from the list.")
+                    return
+                hit = box[0][0]
+                vendor = registry.get(hit.model).vendor
+                self.vendor.set(vendor)
+                self.model.set(hit.model)
+                self.port.set(hit.port)
+                self.baud.set(str(hit.baud))
+                self.link.set("serial")
+                names = [*vendors, NO_RADIO]
+                vlist.selection_clear(0, "end")
+                vlist.selection_set(names.index(vendor))
+                show_models()
+                info.configure(text=f"Found {vendor} {hit.model} on {hit.port} at "
+                                    f"{hit.baud} baud. Press Next.")
+
+            self.after(200, poll)
+
+        tip(ttk.Button(right, text="Detect my radio", command=detect), "detect").pack(
+            anchor="w")
         names = [*vendors, NO_RADIO]
         if self.vendor.get() in names:
             vlist.selection_set(names.index(self.vendor.get()))

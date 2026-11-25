@@ -63,3 +63,28 @@ def open_driver_store_page(app) -> None:
             return
         except Exception:
             continue
+
+
+# Common RTL2832U dongles (vendor, product).
+RTL_IDS = {(0x0BDA, 0x2832), (0x0BDA, 0x2838), (0x0CCD, 0x00A9), (0x0CCD, 0x00B3),
+           (0x0CCD, 0x00D3), (0x185B, 0x0620), (0x185B, 0x0650), (0x1D19, 0x1101),
+           (0x1F4D, 0xB803), (0x1F4D, 0xC803), (0x1B80, 0xD3A4)}
+
+
+def usb_devices(app) -> list[tuple[int, int, str]]:
+    """(vendor, product, name) for every USB device on the phone's port."""
+    if not on_android():
+        return []
+    from java import jclass
+
+    Context = jclass("android.content.Context")
+    manager = _activity(app).getSystemService(Context.USB_SERVICE)
+    out = []
+    for dev in manager.getDeviceList().values():
+        out.append((int(dev.getVendorId()), int(dev.getProductId()),
+                    str(dev.getProductName() or dev.getDeviceName())))
+    return out
+
+
+def rtl_dongles(app) -> list[str]:
+    return [name for vid, pid, name in usb_devices(app) if (vid, pid) in RTL_IDS]
