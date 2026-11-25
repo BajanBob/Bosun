@@ -28,7 +28,8 @@ soapy = ["SoapySDR"]
 rtl = ["pyrtlsdr"]
 airspy = ["airspy"]
 test = ["pytest>=7", "ruff>=0.5"]
-desktop = ["pillow>=10", "sounddevice>=0.4.6", "pyrtlsdr>=0.3", "pyrtlsdrlib>=0.0.3"]
+desktop = ["pillow>=10", "sounddevice>=0.4.6", "pyrtlsdr>=0.3", "pyrtlsdrlib>=0.0.3",
+           "screeninfo>=0.8"]
 
 [project.scripts]
 bosun = "bosun.cli:main"

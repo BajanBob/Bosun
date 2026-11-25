@@ -117,3 +117,20 @@ def test_skirts_of_strong_station_are_not_signals():
     skirt = dsp.Detection(100.24e6, 3e3, -40, 10, "Narrow signal", "")
     far = dsp.Detection(101.5e6, 3e3, -40, 10, "Narrow signal", "")
     assert dsp._drop_skirts([strong, skirt, far]) == [strong, far]
+
+
+def test_video_recorder_avi(tmp_path):
+    import pytest
+
+    pytest.importorskip("PIL")
+    from bosun.videorec import VideoRecorder
+
+    rec = VideoRecorder(tmp_path / "v", fps=5, prefer_mp4=False)
+    for i in range(10):
+        img = np.zeros((50, 61, 3), np.uint8)
+        img[:, i * 5:(i + 1) * 5] = 255
+        rec.add(img, now=i * 0.2)
+    path = rec.close()
+    data = path.read_bytes()
+    assert path.suffix == ".avi" and data[:4] == b"RIFF" and data[8:12] == b"AVI "
+    assert data.count(b"00dc") >= 2 * 10 and b"idx1" in data

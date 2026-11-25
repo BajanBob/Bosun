@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 
@@ -335,6 +336,160 @@ class RtlTcpSource(IQSource):
             time.sleep(0.01)
 
 
+def find_hackrf_tool(name: str = "hackrf_transfer") -> str | None:
+    """hackrf tools from PATH, the folder next to Bosun, or common install places."""
+    import os
+    import shutil
+    import sys
+
+    exe = name + (".exe" if sys.platform.startswith("win") else "")
+    found = shutil.which(exe)
+    if found:
+        return found
+    here = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else __file__)
+    places = [here, os.path.join(here, "hackrf")]
+    if sys.platform.startswith("win"):
+        for root in (os.environ.get("PROGRAMFILES", r"C:\Program Files"),
+                     os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")):
+            places += [os.path.join(root, "PothosSDR", "bin"),
+                       os.path.join(root, "HackRF", "bin"), os.path.join(root, "hackrf")]
+    else:
+        places += ["/usr/local/bin", "/usr/bin", "/opt/homebrew/bin"]
+    for folder in places:
+        path = os.path.join(folder, exe)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def hackrf_boards(timeout: float = 4.0) -> list[str]:
+    """Serial numbers of attached HackRFs (empty if none or no tools)."""
+    import subprocess
+
+    tool = find_hackrf_tool("hackrf_info")
+    if not tool:
+        return []
+    try:
+        out = subprocess.run([tool], capture_output=True, text=True, timeout=timeout,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except Exception:
+        return []
+    serials = [ln.split(":", 1)[1].strip() for ln in out.splitlines()
+               if ln.strip().lower().startswith("serial number")]
+    if not serials and "Found HackRF" in out:
+        serials = ["0"]
+    return serials
+
+
+class HackRFSource(IQSource):
+    """HackRF One via the standard hackrf_transfer tool (streams int8 IQ).
+
+    Retuning restarts the stream (about half a second). Up to 20 MS/s.
+    """
+
+    max_rate = 20e6
+
+    def __init__(self, center_hz: float = 100e6, rate: float = 8e6, gain_db: float = 30.0,
+                 serial: str | None = None, amp: bool = False) -> None:
+        self.center_hz, self.rate, self.gain = center_hz, rate, gain_db
+        self.serial, self.amp = serial, amp
+        self.name = "hackrf" + (f":{serial}" if serial and serial != "0" else "")
+        self.min_hz, self.max_hz = 1e6, 6e9
+        self._proc = None
+        self._buf = np.zeros(0, np.complex64)
+        self._lock = threading.Lock()
+        self._alive = False
+        self._thread: threading.Thread | None = None
+
+    def _cmd(self) -> list[str]:
+        tool = find_hackrf_tool()
+        if not tool:
+            raise SDRUnavailable(
+                "HackRF tools not found. Install them (hackrf_transfer) from Great Scott "
+                "Gadgets, PothosSDR or your package manager, then try again.")
+        # LNA 0-40 dB in 8 dB steps, VGA 0-62 dB in 2 dB steps
+        lna = int(min(40, max(0, self.gain * 0.6)) // 8 * 8)
+        vga = int(min(62, max(0, self.gain - lna + 10)) // 2 * 2)
+        cmd = [tool, "-r", "-", "-f", str(int(self.center_hz)), "-s", str(int(self.rate)),
+               "-l", str(lna), "-g", str(vga), "-a", "1" if self.amp else "0"]
+        if self.serial and self.serial != "0":
+            cmd += ["-d", self.serial]
+        return cmd
+
+    def open(self) -> None:
+        import subprocess
+
+        self.close()
+        self._proc = subprocess.Popen(
+            self._cmd(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self._alive = True
+        self._thread = threading.Thread(target=self._reader, daemon=True, name="hackrf")
+        self._thread.start()
+
+    def _reader(self) -> None:
+        keep = int(self.rate)  # about one second
+        pending = b""
+        out = self._proc.stdout
+        while self._alive:
+            chunk = out.read(262144)
+            if not chunk:
+                break
+            data = pending + chunk
+            usable = len(data) & ~1
+            pending = data[usable:]
+            raw = np.frombuffer(data[:usable], dtype=np.int8).astype(np.float32) / 128.0
+            iq = (raw[0::2] + 1j * raw[1::2]).astype(np.complex64)
+            with self._lock:
+                self._buf = np.concatenate([self._buf, iq])[-keep:]
+        self._alive = False
+
+    def close(self) -> None:
+        self._alive = False
+        if self._proc is not None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(3)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._proc.kill()
+            self._proc = None
+        with self._lock:
+            self._buf = self._buf[:0]
+
+    def tune(self, hz: float) -> None:
+        self.center_hz = float(hz)
+        if self._proc is not None:
+            self.open()
+
+    def set_gain(self, db: float) -> None:
+        self.gain = db
+        if self._proc is not None:
+            self.open()
+
+    def set_rate(self, rate: float) -> None:
+        self.rate = float(rate)
+        if self._proc is not None:
+            self.open()
+
+    def read_all(self, min_n: int, timeout: float = 3.0) -> np.ndarray:
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                if len(self._buf) >= min_n:
+                    out, self._buf = self._buf, self._buf[:0]
+                    return out
+            if not self._alive:
+                raise SDRUnavailable("HackRF stream stopped (is it plugged in and free?)")
+            if time.monotonic() > deadline:
+                raise SDRUnavailable("no samples from the HackRF")
+            time.sleep(0.005)
+
+    def read(self, n: int, timeout: float = 3.0) -> np.ndarray:
+        data = self.read_all(n, timeout)
+        return data[-n:]
+
+
 def parse_rtl_tcp(name: str) -> tuple[str, int]:
     rest = name.split(":", 1)[1] if name.startswith("rtl_tcp") else name
     host, _, port = rest.rpartition(":")
@@ -344,6 +499,8 @@ def parse_rtl_tcp(name: str) -> tuple[str, int]:
 def list_sources() -> list[str]:
     """Names for the source picker: the demo plus any SDRs found."""
     names = [DemoSource.name, RTL_TCP_DEFAULT]
+    for serial in hackrf_boards():
+        names.append("hackrf" + (f":{serial}" if serial != "0" else ""))
     try:
         from .sdr import available
 
@@ -360,6 +517,9 @@ def open_source(name: str, center_hz: float, rate: float = DEFAULT_RATE,
                 gain_db: float = 30.0) -> IQSource:
     if name == DemoSource.name or not name:
         src: IQSource = DemoSource(center_hz, rate)
+    elif name.startswith("hackrf"):
+        serial = name.split(":", 1)[1] if ":" in name else None
+        src = HackRFSource(center_hz, min(max(rate, 2e6), 20e6), gain_db, serial)
     elif name.startswith("rtl_tcp"):
         host, port = parse_rtl_tcp(name)
         src = RtlTcpSource(host, port, center_hz, min(rate, 2.4e6), gain_db)

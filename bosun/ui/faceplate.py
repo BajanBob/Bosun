@@ -46,6 +46,8 @@ TIPS = {
     "night": "Night mode: dim red on black so your eyes stay adapted to the dark.",
     "full": "Full screen for a dedicated touch display. Esc leaves full screen.",
     "close": "Close the faceplate and return to the normal window.",
+    "rec": "Record the faceplate as a video (saved in 'Bosun Recordings').",
+    "listen": "LISTEN: hear the tuned signal through the speakers (from the SDR).",
     "freq": "Swipe left or right on the frequency to tune. Tap a digit side to step.",
     "down": "Tune down by the selected step.", "up": "Tune up by the selected step.",
     "spec": "Live spectrum and waterfall. Tap a signal to tune to it.",
@@ -79,6 +81,7 @@ class Faceplate(tk.Toplevel):
         self._drag: tuple[int, float] | None = None
         self._photo = None
         self.tip = ""
+        self.recorder = None
         self.fall = Waterfall(600, 90, 110, self.t["spec"])
         self.canvas.bind("<Configure>", lambda _e: self.redraw())
         self.canvas.bind("<ButtonPress-1>", self._press)
@@ -147,6 +150,9 @@ class Faceplate(tk.Toplevel):
             app._bg(app.ctl.tune, app.freq.get(), mode, done=app._show_status)
         if sp is not None:
             sp.selected_hz = self.freq_hz
+            if mode:
+                sp.rec_mode.set({"NFM": "FM"}.get(mode, mode))
+            sp._listen_retarget()
             src = sp.source
             if src is not None and abs(self.freq_hz - src.center_hz) > src.rate * 0.4:
                 sp.retune(self.freq_hz)
@@ -166,7 +172,40 @@ class Faceplate(tk.Toplevel):
     def toggle_full(self) -> None:
         self.attributes("-fullscreen", not bool(self.attributes("-fullscreen")))
 
+    def toggle_listen(self) -> None:
+        sp = self.app.spectrum
+        if sp is None:
+            return
+        if sp.listener is None:
+            if not self.powered:
+                self.power()
+            sp.selected_hz = self.freq_hz
+            sp.rec_mode.set({"NFM": "FM"}.get(self.mode, self.mode))
+            self.after(400, lambda: (sp.toggle_listen(), self.redraw()))
+        else:
+            sp.toggle_listen()
+        self.redraw()
+
+    def toggle_rec(self) -> None:
+        from ..recorder import recordings_dir, stamp
+        from ..videorec import WindowRecorder
+
+        if self.recorder is not None:
+            rec, self.recorder = self.recorder, None
+            path = rec.stop()
+            msg = (f"Faceplate video saved ({rec.rec.kind}): {path}" if path else
+                   f"Could not record the screen: {rec.error}")
+            self.app.say(msg)
+        else:
+            self.recorder = WindowRecorder(self.canvas, recordings_dir() /
+                                           stamp("faceplate_video"))
+            self.recorder.start()
+            self.app.say("Recording the faceplate...")
+        self.redraw()
+
     def close(self) -> None:
+        if self.recorder is not None:
+            self.toggle_rec()
         try:
             from .. import config
             config.save_settings({"faceplate_step": self.step})
@@ -265,7 +304,7 @@ class Faceplate(tk.Toplevel):
                   f"COGNITIVE · LEARNING · {len(active)} ACTIVE · "
                   f"{len(cog.signals) if cog else 0} LOGGED")
         bw = top_h * 1.5
-        buttons_x0 = W - pad * 2 - 3 * bw - 2 * pad
+        buttons_x0 = W - pad * 2 - 5 * bw - 4 * pad
         utc = time.strftime("%H:%M UTC", time.gmtime())
         c.create_text(buttons_x0 - pad * 2, pad + top_h / 2, anchor="e", text=utc,
                       fill=t["dim"], font=("Helvetica", int(top_h * 0.25)), tags="clock")
@@ -275,10 +314,16 @@ class Faceplate(tk.Toplevel):
         bx = W - pad * 2
         for label, key, fn in (("✕", "close", self.close), ("⛶", "full", self.toggle_full),
                                ("☾" if self.theme_name == "day" else "☀", "night",
-                                self.toggle_night)):
+                                self.toggle_night),
+                               ("● REC", "rec", self.toggle_rec),
+                               ("♪ LISTEN", "listen", self.toggle_listen)):
+            sp = self.app.spectrum
+            active = (key == "night" and self.theme_name == "night") or \
+                (key == "rec" and self.recorder is not None) or \
+                (key == "listen" and sp is not None and sp.listener is not None)
             self._button((bx - bw, pad * 1.8, bx, pad + top_h - pad * 0.8), label, key, fn,
-                         size=int(top_h * 0.35), active=(key == "night" and
-                                                         self.theme_name == "night"))
+                         size=int(top_h * 0.3), active=active,
+                         colour=t["warn"] if key == "rec" else None)
             bx -= bw + pad
 
         body_y = pad * 2 + top_h

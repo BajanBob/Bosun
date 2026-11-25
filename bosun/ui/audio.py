@@ -39,6 +39,11 @@ class AudioTab(ttk.Frame):
                                                      sticky="w")
         tip(ttk.Button(self, text="Open recordings folder", command=app._open_recordings),
             "open_folder").grid(row=5, column=0, sticky="w", pady=PAD)
+        self.monitor_var = tk.BooleanVar(value=False)
+        tip(ttk.Checkbutton(self, text="Play the radio through the speakers",
+                            variable=self.monitor_var, command=self.toggle_monitor),
+            "monitor").grid(row=5, column=1, sticky="w", padx=PAD)
+        self.monitor = None
 
         chan = ttk.LabelFrame(self, text="Channel list (CHIRP CSV)", padding=PAD)
         chan.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=PAD)
@@ -113,7 +118,27 @@ class AudioTab(ttk.Frame):
         if path:
             self.app.say(f"Saved {chirp.write_csv(path, rows)} channels to {path}")
 
+    def toggle_monitor(self) -> None:
+        from ..listen import RadioMonitor
+
+        if self.monitor is not None:
+            self.monitor.close()
+            self.monitor = None
+            self.info.set("Speaker monitor off.")
+            return
+        if not self.monitor_var.get():
+            return
+        try:
+            self.monitor = RadioMonitor(self.device.get() or None)
+            self.info.set("Playing the radio through the speakers.")
+        except Exception as exc:
+            self.monitor_var.set(False)
+            self.info.set(f"Cannot monitor: {exc}")
+
     def shutdown(self) -> None:
+        if self.monitor is not None:
+            self.monitor.close()
+            self.monitor = None
         if self.rec is not None:
             self.rec.close()
             self.rec = None

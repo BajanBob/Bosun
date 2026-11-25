@@ -125,6 +125,25 @@ class SpectrumTab(ttk.Frame):
         self.audio_btn = tip(ttk.Button(det, text="Record audio", command=self.toggle_audio),
                              "rec_audio")
         self.audio_btn.pack(side="left", padx=(2, 0))
+        self.video_btn = tip(ttk.Button(det, text="Record video", command=self.toggle_video),
+                             "rec_video")
+        self.video_btn.pack(side="left", padx=PAD)
+        self.video_rec = None
+        ttk.Separator(det, orient="vertical").pack(side="left", fill="y", padx=PAD)
+        self.listen_btn = tip(ttk.Button(det, text="Listen", command=self.toggle_listen),
+                              "listen")
+        self.listen_btn.pack(side="left")
+        ttk.Label(det, text="Vol").pack(side="left", padx=(PAD, 2))
+        self.volume = tk.DoubleVar(value=0.7)
+        tip(ttk.Scale(det, from_=0, to=1, variable=self.volume, length=70,
+                      command=lambda _v: self._listen_settings()), "volume").pack(side="left")
+        ttk.Label(det, text="Squelch").pack(side="left", padx=(PAD, 2))
+        self.squelch = tk.DoubleVar(value=0)
+        tip(ttk.Scale(det, from_=0, to=30, variable=self.squelch, length=70,
+                      command=lambda _v: self._listen_settings()), "sql").pack(side="left")
+        self.rec_mode.trace_add("write", lambda *_a: self._listen_retarget())
+        self.listener = None
+        self._audio_out = None
 
         body = ttk.PanedWindow(self, orient="vertical")
         body.grid(row=3, column=0, sticky="nsew", pady=(PAD, 0))
@@ -242,6 +261,7 @@ class SpectrumTab(ttk.Frame):
         if hz is not None:
             self.center.set(f"{hz / 1e6:.4f}")
         self._sync_opts()
+        self.after(300, self._listen_retarget)
         if self.source is not None and SPANS.get(self.span.get(), 0) <= getattr(
                 self.source, "max_rate", 2.4e6):
             try:
@@ -383,6 +403,12 @@ class SpectrumTab(ttk.Frame):
         img = self.view.image(detections=self.detections, floor_db=getattr(self, "_floor", None),
                               title=title, marker_hz=self.selected_hz,
                               new_hz=self._near_new(new))
+        if self.video_rec is not None:
+            with contextlib.suppress(Exception):
+                self.video_rec.add(img)
+        for cb in list(getattr(self, "frame_listeners", [])):
+            with contextlib.suppress(Exception):
+                cb(img)
         self._photo = self._to_photo(img)
         self.frames_drawn = getattr(self, "frames_drawn", 0) + 1
         self.canvas.delete("img")
@@ -458,6 +484,7 @@ class SpectrumTab(ttk.Frame):
 
     def select(self, hz: float) -> None:
         self.selected_hz = hz
+        self._listen_retarget()
         self.app.say(f"Selected {hz / 1e6:.5f} MHz.")
         self.app.tune_radio(hz)
 
@@ -524,7 +551,78 @@ class SpectrumTab(ttk.Frame):
         self.app.say(f"Recording {self.rec_mode.get()} audio at "
                      f"{self.selected_hz / 1e6:.5f} MHz...")
 
+    # ---------------------------------------------------------------- listening
+    def toggle_listen(self) -> None:
+        from ..listen import AudioOut, SDRListener
+
+        if self.listener is not None:
+            self._stop_listen()
+            self.app.say("Stopped listening.")
+            return
+        if self.source is None or self.selected_hz is None:
+            self.app.say("Start the spectrum and click a signal first.")
+            return
+        if self._wide():
+            self.app.say("Listening needs a span of 2.4 MHz or less.")
+            return
+        try:
+            self._audio_out = AudioOut(self.app.settings.get("audio_output"))
+        except Exception as exc:
+            self.app.say(f"Cannot play audio: {exc}")
+            return
+        src = self.source
+        self.listener = SDRListener(self._audio_out, src.rate, src.center_hz,
+                                    self.selected_hz, self.rec_mode.get(),
+                                    self.volume.get(), self.squelch.get())
+        self.iq_taps.append(self.listener)
+        self.listen_btn.configure(text="Stop listening")
+        self.app.say(f"Listening to {self.selected_hz / 1e6:.5f} MHz ({self.rec_mode.get()}). "
+                     "Click another signal to switch.")
+
+    def _stop_listen(self) -> None:
+        if self.listener is not None and self.listener in self.iq_taps:
+            self.iq_taps.remove(self.listener)
+        self.listener = None
+        if self._audio_out is not None:
+            self._audio_out.close()
+            self._audio_out = None
+        self.listen_btn.configure(text="Listen")
+
+    def _listen_settings(self) -> None:
+        if self.listener is not None:
+            self.listener.volume = self.volume.get()
+            self.listener.squelch_db = self.squelch.get()
+
+    def _listen_retarget(self) -> None:
+        lst, src = self.listener, self.source
+        if lst is None or src is None or self.selected_hz is None:
+            return
+        if abs(self.selected_hz - src.center_hz) > src.rate / 2:
+            return
+        lst.retarget(src.center_hz, self.selected_hz, self.rec_mode.get(), src.rate)
+
+    def toggle_video(self) -> None:
+        from ..videorec import VideoRecorder
+
+        if self.video_rec is not None:
+            rec, self.video_rec = self.video_rec, None
+            path = rec.close()
+            self.video_btn.configure(text="Record video")
+            self.app.say(f"Video saved ({rec.kind}, {rec.frames / rec.fps:.0f} s): {path}"
+                         if path else "No video frames were recorded.")
+            return
+        if self.source is None:
+            self.app.say("Start the spectrum first.")
+            return
+        self.video_rec = VideoRecorder(recordings_dir() / stamp("spectrum_video"), fps=10)
+        self.video_btn.configure(text="Stop video")
+        self.app.say("Recording the spectrum and waterfall as video...")
+
     def _close_recorders(self) -> None:
+        if self.video_rec is not None:
+            self.toggle_video()
+        if self.listener is not None:
+            self._stop_listen()
         if self.iq_rec is not None:
             self.toggle_iq()
         if self.audio_rec is not None:

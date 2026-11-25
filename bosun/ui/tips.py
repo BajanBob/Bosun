@@ -63,6 +63,15 @@ TIPS = {
               "SDR# and other tools). Files get large quickly.",
     "rec_audio": "Record the selected signal as listenable audio (WAV). Click a signal on "
                  "the waterfall first, and pick its mode.",
+    "rec_video": "Record the spectrum and waterfall as a video: MP4 if ffmpeg is installed, "
+                 "otherwise AVI (plays in VLC and Windows Media Player).",
+    "listen": "Hear the selected signal through your speakers, demodulated live. Click "
+              "another signal to switch to it; the mode box sets FM, AM, USB, LSB or CW.",
+    "volume": "Listening volume.",
+    "sql": "Squelch: stay silent until the signal is this many dB above the quietest "
+           "level heard. 0 = always open.",
+    "monitor": "Play the radio's audio input through the speakers (for radios connected "
+               "by a USB audio cable or line-in).",
     "rec_mode": "How to demodulate the selected signal for audio recording.",
     "sweep_start": "Sweep: lowest frequency in MHz. Sweeps cover ranges wider than one view.",
     "sweep_stop": "Sweep: highest frequency in MHz.",

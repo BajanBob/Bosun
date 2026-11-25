@@ -28,6 +28,25 @@ on version tags (`v*`), and from Actions → Build Bosun Packages → Run workfl
   limit). The 5 / 10 / 20 / 40 MHz "(sweep)" spans step it across the range
   and stitch one live picture (slower refresh; recording needs 2.4 MHz or
   less). **Sweep** covers any range and logs what is found.
+- **Live listening** (the receive > DSP > demodulator > speaker chain): click a
+  signal, press Listen; FM / WFM / AM / USB / LSB / CW, squelch, volume,
+  de-emphasis; follows whatever you click. The Audio tab can also play the
+  radio's own audio through the speakers. Faceplate: LISTEN key.
+- **SSTV pictures** (Pictures tab): Martin, Scottie, Robot 36, PD90/120/180
+  (ISS events use PD120/PD180 on 145.800 MHz) from the radio's audio, an SDR
+  signal or a WAV file; pictures save automatically. (NOAA APT weather
+  satellites were switched off in 2025, so APT is not included.)
+- **Analogue video** (View > Video): PAL / NTSC black-and-white pictures from
+  FPV (FM, 5.8 GHz Raceband / Band A, 1.3 GHz) or broadcast (AM). Needs a wide
+  receiver: the HackRF One (up to 20 MS/s) via the standard `hackrf_transfer`
+  tool, which you install once (Great Scott Gadgets release, PothosSDR, or your
+  package manager). A built-in test pattern lets you try it without hardware.
+  Snapshot PNG and video recording.
+- **Video recording**: spectrum/waterfall, faceplate (REC) and analogue video.
+  MP4 when ffmpeg is installed, otherwise AVI (Motion JPEG) which plays in VLC
+  and Windows Media Player.
+- **Second screen** (View > Second screen): faceplate, spectrum or video full
+  screen on another monitor or TV.
 - **Recording**: IQ (SigMF), demodulated audio (WAV), radio audio from any sound
   input (WAV), spectrum screen captures (PNG). Saved in `Bosun Recordings` in
   your home folder.

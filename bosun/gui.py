@@ -96,6 +96,8 @@ class BosunApp(ttk.Frame):
         self._apply_settings()
         self.after(50, self._drain)
         self.watcher = None
+        self.screens: list = []
+        self.video_window = None
         if self.settings.get("auto_detect", True):
             self.after(500, self.start_watching)
         if first_run_wizard and not self.settings.get("setup_done"):
@@ -113,6 +115,8 @@ class BosunApp(ttk.Frame):
         bar.add_cascade(label="Setup", menu=setup)
         view = tk.Menu(bar, tearoff=False)
         view.add_command(label="Faceplate (touch screen)", command=self.open_faceplate)
+        view.add_command(label="Video (analogue TV / FPV)", command=self.open_video)
+        view.add_command(label="Second screen...", command=self.open_second_screen)
         bar.add_cascade(label="View", menu=view)
         helpm = tk.Menu(bar, tearoff=False)
         self.tips_var = tk.BooleanVar(value=Tooltip.enabled)
@@ -370,6 +374,20 @@ class BosunApp(ttk.Frame):
         if full_screen:
             self.faceplate.after(200, lambda: self.faceplate.attributes("-fullscreen", True))
         return self.faceplate
+
+    def open_video(self):
+        from .ui.video import VideoWindow
+
+        if getattr(self, "video_window", None) is not None:
+            self.video_window.lift()
+            return self.video_window
+        self.video_window = VideoWindow(self)
+        return self.video_window
+
+    def open_second_screen(self) -> None:
+        from .ui.screens import SecondScreenDialog
+
+        SecondScreenDialog(self)
 
     # ---------- automatic device detection ----------
     def start_watching(self) -> None:
@@ -672,6 +690,12 @@ class BosunApp(ttk.Frame):
             if getattr(self, "faceplate", None) is not None:
                 with contextlib.suppress(Exception):
                     self.faceplate.destroy()
+            if getattr(self, "video_window", None) is not None:
+                with contextlib.suppress(Exception):
+                    self.video_window.close()
+            for scr in list(getattr(self, "screens", [])):
+                with contextlib.suppress(Exception):
+                    scr.close()
             if self.spectrum is not None:
                 self.spectrum.shutdown()
             self.audio_tab.shutdown()
@@ -701,6 +725,11 @@ def main(argv: list[str] | None = None) -> int:
 
     log = crashlog.setup()
     args = sys.argv[1:] if argv is None else argv
+    if sys.platform.startswith("win"):
+        # Sharp text on high-DPI screens, and screen captures that line up.
+        with contextlib.suppress(Exception):
+            import ctypes
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
     selftest = "--selftest" in args
     try:
         root = tk.Tk()
@@ -731,7 +760,7 @@ def main(argv: list[str] | None = None) -> int:
         # and probe devices, then exit; fail if anything breaks.
         if app.spectrum is not None:
             app.spectrum.src_name.set("Demo (simulated signals)")
-            if "--faceplate" not in args:  # the faceplate's ON button starts it
+            if "--faceplate" not in args and "--video" not in args:  # they start it
                 root.after(200, app.spectrum.toggle)
             root.after(300, app.spectrum.find_sdrs)
         if "--faceplate" in args:
@@ -741,6 +770,14 @@ def main(argv: list[str] | None = None) -> int:
                 root.after(1400, fp.toggle_night)
                 root.after(2000, lambda: fp.tune(145.5e6, "FM"))
             root.after(300, drive_faceplate)
+        if "--video" in args:
+            def drive_video():
+                vw = app.open_video()
+                vw.toggle()
+                from .ui.screens import ScreenWindow, monitors
+                app.screens.append(ScreenWindow(app, "Video (analogue TV / FPV)",
+                                                monitors(root)[0]))
+            root.after(300, drive_video)
         if "--wizard" in args:
             def drive_wizard():
                 from .ui.wizard import SetupWizard
@@ -754,6 +791,9 @@ def main(argv: list[str] | None = None) -> int:
 
         def finish():
             drawn = getattr(app.spectrum, "frames_drawn", 0) if app.spectrum else 0
+            if "--video" in args:
+                vw = app.video_window
+                drawn = 1 if vw is not None and vw.last_frame is not None else 0
             errors = crashlog.log_path().read_text(encoding="utf-8", errors="replace")
             failed = "ERROR" in errors.split("window ready")[-1]
             result["ok"] = drawn > 0 and not failed

@@ -120,6 +120,8 @@ class Demodulator:
         start = (-self._phase) % self.decim  # keep decimation phase across calls
         base = filt[start:: self.decim]
         self._phase = (self._phase + len(filt)) % self.decim
+        if len(base):
+            self.last_power = float(np.mean(np.abs(base) ** 2))  # in-channel, for squelch
         if self.mode in ("FM", "NFM", "WFM"):
             prev = np.concatenate([[self._prev], base[:-1]])
             audio = np.angle(base * np.conj(prev)).astype(np.float32)
