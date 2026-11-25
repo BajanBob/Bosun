@@ -16,10 +16,11 @@ from .. import chirp, dsp
 from ..cognitive import CognitiveReceiver, Sweeper
 from ..recorder import IQRecorder, SDRAudioRecorder, recordings_dir, stamp
 from ..render import SpectrumView
-from ..sources import list_sources, open_source
+from ..sources import DemoSource, list_sources, open_source
 from .tips import tip
 
 PAD = 6
+DEMO = DemoSource.name
 SPANS = {"250 kHz": 0.25e6, "1 MHz": 1.024e6, "2 MHz": 2.048e6, "2.4 MHz": 2.4e6}
 NFFT = 2048
 
@@ -60,10 +61,14 @@ class SpectrumTab(ttk.Frame):
         bar.grid(row=0, column=0, sticky="ew")
         settings = self.app.settings
         ttk.Label(bar, text="Source").pack(side="left")
-        self.src_name = tk.StringVar(value=settings.get("sdr") or list_sources()[0])
+        # SDR hardware is probed only on request (Find SDRs), never at startup.
+        known = [DEMO] + ([settings["sdr"]] if settings.get("sdr") not in (None, DEMO) else [])
+        self.src_name = tk.StringVar(value=settings.get("sdr") or DEMO)
         self.src_box = tip(ttk.Combobox(bar, textvariable=self.src_name, width=26,
-                                        values=list_sources()), "source")
-        self.src_box.pack(side="left", padx=(2, PAD))
+                                        values=known), "source")
+        self.src_box.pack(side="left", padx=(2, 2))
+        tip(ttk.Button(bar, text="Find SDRs", command=self.find_sdrs), "find_sdrs").pack(
+            side="left", padx=(0, PAD))
         ttk.Label(bar, text="Centre MHz").pack(side="left")
         self.center = tk.StringVar(value=str(settings.get("sdr_center_mhz", 145.2)))
         e = tip(ttk.Entry(bar, textvariable=self.center, width=10), "center")
@@ -162,6 +167,22 @@ class SpectrumTab(ttk.Frame):
         self.sweep_btn.pack(fill="x", pady=2)
 
     # ---------------------------------------------------------------- source
+    def find_sdrs(self) -> None:
+        self.app.say("Looking for SDRs...")
+
+        def work():
+            names = list_sources()
+            self.app.post(self._found_sdrs, names)
+
+        threading.Thread(target=work, daemon=True, name="find-sdrs").start()
+
+    def _found_sdrs(self, names: list[str]) -> None:
+        self.src_box.configure(values=names)
+        real = [n for n in names if n != DEMO]
+        self.app.say(f"Found {len(real)} SDR(s): {', '.join(real)}" if real else
+                     "No SDRs found. Plug one in (and on Windows install the WinUSB "
+                     "driver with Zadig), then press Find SDRs again.")
+
     def _center_hz(self) -> float:
         return float(self.center.get().replace(",", ".")) * 1e6
 

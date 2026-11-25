@@ -493,27 +493,85 @@ class BosunApp(ttk.Frame):
             self.root.destroy()
 
 
+def _show_fatal(exc: BaseException, log) -> None:
+    try:
+        from tkinter import messagebox
+
+        r = tk.Tk()
+        r.withdraw()
+        messagebox.showerror(
+            "Bosun could not start",
+            f"{type(exc).__name__}: {exc}\n\nDetails were saved to:\n{log}\n\n"
+            "Please send that file to the developer.")
+        r.destroy()
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    from . import crashlog
+
+    log = crashlog.setup()
     args = sys.argv[1:] if argv is None else argv
     selftest = "--selftest" in args
-    root = tk.Tk()
-    app = BosunApp(root, first_run_wizard=not selftest)
+    try:
+        root = tk.Tk()
+    except Exception as exc:
+        crashlog.log_exception(type(exc), exc, exc.__traceback__, "creating window")
+        _show_fatal(exc, log)
+        return 1
+
+    def on_callback_error(exc_type, exc, tb):
+        crashlog.log_exception(exc_type, exc, tb, "in UI callback")
+        with contextlib.suppress(Exception):
+            app.say(f"Something went wrong: {exc} (details in {log})")
+
+    root.report_callback_exception = on_callback_error
+    try:
+        app = BosunApp(root, first_run_wizard=not selftest)
+    except Exception as exc:
+        crashlog.log_exception(type(exc), exc, exc.__traceback__, "starting app")
+        root.destroy()
+        _show_fatal(exc, log)
+        return 1
+    crashlog.write("window ready")
     result = {"ok": True}
     if selftest:
-        # Build the window, run the demo spectrum briefly, then exit. Used by CI:
-        # fails if the spectrum never draws.
+        # CI: run the demo spectrum, optionally click through the setup wizard
+        # and probe devices, then exit; fail if anything breaks.
         if app.spectrum is not None:
             app.spectrum.src_name.set("Demo (simulated signals)")
             root.after(200, app.spectrum.toggle)
+            root.after(300, app.spectrum.find_sdrs)
+        if "--wizard" in args:
+            def drive_wizard():
+                from .ui.wizard import SetupWizard
+                wiz = SetupWizard(root, on_done=None)
+                wiz.vendor.set("Icom")
+                wiz.model.set("IC-9100")
+                for delay in (300, 600, 900):
+                    root.after(delay, wiz.next)
+                root.after(1400, wiz.destroy)
+            root.after(400, drive_wizard)
 
         def finish():
             drawn = getattr(app.spectrum, "frames_drawn", 0) if app.spectrum else 0
-            result["ok"] = drawn > 0
-            print(f"selftest: spectrum frames drawn = {drawn}")
+            errors = crashlog.log_path().read_text(encoding="utf-8", errors="replace")
+            failed = "ERROR" in errors.split("window ready")[-1]
+            result["ok"] = drawn > 0 and not failed
+            print(f"selftest: spectrum frames drawn = {drawn}, errors = {failed}")
+            if failed:
+                print(errors.split("window ready")[-1][-3000:])
             app.quit_app()
 
-        root.after(3000, finish)
-    root.mainloop()
+        root.after(3500, finish)
+    try:
+        root.mainloop()
+    except Exception as exc:
+        crashlog.log_exception(type(exc), exc, exc.__traceback__, "main loop")
+        _show_fatal(exc, log)
+        return 1
+    crashlog.write("closed normally")
     return 0 if result["ok"] else 1
 
 

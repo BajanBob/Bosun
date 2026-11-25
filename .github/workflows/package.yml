@@ -41,14 +41,15 @@ jobs:
       - name: Build desktop app and command-line tool
         shell: bash
         run: |
-          EXTRA=""
+          # Windows: a normal program folder (onedir) starts faster and is far
+          # less likely to be blocked by antivirus than a self-extracting exe.
           if [ "${{ matrix.name }}" = "windows" ]; then
-            EXTRA="--icon packaging/windows/bosun.ico"
+            EXTRA="--onedir --icon packaging/windows/bosun.ico"
           else
             PA=$(ldconfig -p | grep -m1 'libportaudio.so.2 ' | awk '{print $NF}')
-            EXTRA="--add-binary $PA:."
+            EXTRA="--onefile --add-binary $PA:."
           fi
-          pyinstaller --clean --noconfirm --onefile --windowed --name Bosun $EXTRA \
+          pyinstaller --clean --noconfirm --windowed --name Bosun $EXTRA \
             --collect-all bosun --collect-all pyrtlsdrlib --collect-all rtlsdr \
             --collect-all sounddevice --hidden-import PIL._tkinter_finder \
             packaging/gui_entry.py
@@ -60,22 +61,31 @@ jobs:
         run: |
           ./dist/bosun-cli --version
           xvfb-run -a ./dist/Bosun --selftest
+          xvfb-run -a ./dist/Bosun --selftest --wizard
 
       - name: Smoke test (Windows)
         if: matrix.name == 'windows'
         shell: pwsh
         run: |
           ./dist/bosun-cli.exe --version
-          $p = Start-Process -FilePath dist/Bosun.exe -ArgumentList "--selftest" -PassThru -Wait
-          if ($p.ExitCode -ne 0) { throw "Bosun.exe self-test failed: $($p.ExitCode)" }
+          foreach ($a in @("--selftest", "--selftest --wizard")) {
+            $p = Start-Process -FilePath dist/Bosun/Bosun.exe -ArgumentList $a -PassThru -Wait
+            Write-Host "Bosun.exe $a exit code $($p.ExitCode)"
+            if ($p.ExitCode -ne 0) {
+              Get-Content "$env:LOCALAPPDATA\Bosun\bosun.log" -Tail 80
+              throw "Bosun.exe $a failed: $($p.ExitCode)"
+            }
+          }
+          Get-Content "$env:LOCALAPPDATA\Bosun\bosun.log" -Tail 20
 
       - name: Package Windows executable and installer
         if: matrix.name == 'windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force package | Out-Null
-          Copy-Item dist/Bosun.exe, dist/bosun-cli.exe, packaging/windows/README.txt package/
-          Compress-Archive -Path package/* -DestinationPath Bosun-Windows-x64.zip -Force
+          Copy-Item -Recurse dist/Bosun package/Bosun
+          Copy-Item dist/bosun-cli.exe, packaging/windows/README.txt package/Bosun/
+          Compress-Archive -Path package/Bosun -DestinationPath Bosun-Windows-x64.zip -Force
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
             $env:Path += ";${env:ProgramFiles(x86)}\Inno Setup 6"
           }

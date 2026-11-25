@@ -40,6 +40,7 @@ TIPS = {
     # spectrum
     "source": "Where the spectrum comes from: an RTL-SDR or other SDR, or the Demo, which "
               "simulates a busy band so you can try everything without hardware.",
+    "find_sdrs": "Search for plugged-in SDRs (RTL-SDR, SoapySDR devices, Airspy).",
     "center": "Centre of the view in MHz. Double-click the waterfall to re-centre there.",
     "span": "How wide a slice to show. Narrower spans show more detail (and tell AM from FM).",
     "gain": "SDR gain in dB. Raise it for weak signals; lower it if the waterfall turns "

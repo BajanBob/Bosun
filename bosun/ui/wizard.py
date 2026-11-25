@@ -276,11 +276,34 @@ class SetupWizard(tk.Toplevel):
         box.pack(fill="x")
         box.columnconfigure(1, weight=1)
         ttk.Label(box, text="Spectrum source").grid(row=0, column=0, sticky="w")
-        sources = list_sources()
-        tip(ttk.Combobox(box, textvariable=self.sdr, values=sources, state="readonly"),
-            "source").grid(row=0, column=1, sticky="ew", padx=PAD, pady=4)
+        demo = "Demo (simulated signals)"
+        src_box = tip(ttk.Combobox(box, textvariable=self.sdr, values=[demo],
+                                   state="readonly"), "source")
+        src_box.grid(row=0, column=1, sticky="ew", padx=PAD, pady=4)
         if not self.sdr.get():
-            self.sdr.set(sources[-1] if len(sources) > 1 else sources[0])
+            self.sdr.set(demo)
+        found: list[list[str]] = []
+
+        def probe():
+            found.append(list_sources())
+
+        def fill():
+            if not self.winfo_exists():
+                return
+            if not found:
+                self.after(150, fill)
+                return
+            names = found[0]
+            src_box.configure(values=names)
+            real = [n for n in names if n != demo]
+            if real and self.sdr.get() == demo:
+                self.sdr.set(real[0])
+            self.sub.configure(text=f"Found {len(real)} SDR(s)." if real else
+                               "No SDR found: Demo is selected. You can add one later.")
+
+        self.sub.configure(text="Looking for SDRs...")
+        threading.Thread(target=probe, daemon=True, name="wizard-sdr").start()
+        self.after(150, fill)
         ttk.Label(box, foreground="#555", wraplength=480, justify="left", text=(
             "RTL-SDR dongles work out of the box on Windows once the WinUSB driver is "
             "installed with Zadig; on Linux, unplug and replug after installing. Other "
