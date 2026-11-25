@@ -118,7 +118,12 @@ class ScanEngine:
                 self._wait(self.dwell)
                 if self._stop.is_set():
                     return
-                if self.detector is not None and self.detector():
+                try:
+                    hit = self.detector is not None and self.detector()
+                except Exception:
+                    self.stats.errors += 1
+                    hit = False
+                if hit:
                     self.stats.hits += 1
                     if self.on_hit:
                         self.on_hit(hz)

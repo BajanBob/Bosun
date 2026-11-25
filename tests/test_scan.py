@@ -60,3 +60,19 @@ def test_bad_dwell():
 def test_range_validation(fake_radio):
     with pytest.raises(ScanError):
         ScanEngine(fake_radio, mode="range").use_range(200, 100, 10)
+
+
+def test_detector_errors_do_not_kill_scan():
+    from bosun.scan import ScanEngine
+
+    class Radio:
+        def set_frequency(self, hz):
+            pass
+
+    def broken():
+        raise RuntimeError("no reply")
+
+    engine = ScanEngine(Radio(), mode="range", dwell=0.001, detector=broken, max_cycles=2)
+    engine.use_range(1e6, 1.002e6, 1e3)
+    engine.run()
+    assert engine.stats.cycles == 2 and engine.stats.errors == 6

@@ -26,6 +26,10 @@ AR-8200 masks out `Cap.SQUELCH` because it has no `SQ` command.
 
 ## Use
 
+Desktop app: `bosun-gui` (or the Bosun app from the downloads below).
+
+Command line:
+
     bosun probe
     bosun id --model IC-9700 --port /dev/ttyUSB0
     bosun set --model FT-991A --port /dev/ttyUSB0 --freq 14.225 --mode USB

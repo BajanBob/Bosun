@@ -1,4 +1,7 @@
-"""UI-independent logic for Bosun Mobile. Blocking calls; the app runs them off the UI thread."""
+"""UI-independent logic shared by the desktop and mobile apps.
+
+All calls block; the apps run them off the UI thread.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +12,15 @@ from bosun.caps import Cap
 from bosun.errors import BosunError
 from bosun.radios.registry import DRIVERS, catalogue
 from bosun.scan import ScanEngine
-from bosun.transport import TCPTransport
+from bosun.transport import SerialTransport, TCPTransport, list_serial_ports
+
+
+def serial_ports() -> list[str]:
+    return list_serial_ports()
+
+
+def default_baud(model: str) -> int:
+    return DRIVERS[model].default_baud
 
 
 def models() -> list[str]:
@@ -55,8 +66,9 @@ def parse_mhz(text: str, label: str = "frequency") -> float:
 class Controller:
     """Holds one radio connection and an optional scan."""
 
-    def __init__(self, transport_factory=TCPTransport) -> None:
+    def __init__(self, transport_factory=TCPTransport, serial_factory=SerialTransport) -> None:
         self._factory = transport_factory
+        self._serial_factory = serial_factory
         self.radio = None
         self.scan: ScanEngine | None = None
         self._lock = threading.Lock()
@@ -69,11 +81,38 @@ class Controller:
         if model not in DRIVERS:
             raise BosunError(f"unknown model {model!r}")
         h, p = parse_endpoint(host, port)
+        return self._open(model, self._factory(h, p))
+
+    def connect_serial(self, model: str, port: str, baud: str | int | None = None) -> dict:
+        if model not in DRIVERS:
+            raise BosunError(f"unknown model {model!r}")
+        port = (port or "").strip()
+        if not port:
+            raise BosunError("choose a serial port (e.g. COM3 or /dev/ttyUSB0)")
+        if baud in (None, ""):
+            rate = DRIVERS[model].default_baud
+        else:
+            try:
+                rate = int(str(baud).strip())
+            except ValueError:
+                raise BosunError("baud rate must be a number") from None
+        return self._open(model, self._serial_factory(port, rate))
+
+    def _open(self, model: str, transport) -> dict:
         self.disconnect()
-        radio = DRIVERS[model](self._factory(h, p))
+        radio = DRIVERS[model](transport)
         radio.connect()
         self.radio = radio
         return self.status()
+
+    def set_level(self, name: str, pct: float) -> None:
+        """name: af, rf or squelch; pct 0-100."""
+        radio = self._need()
+        fn = {"af": "set_af_gain", "rf": "set_rf_gain", "squelch": "set_squelch"}[name]
+        if not hasattr(radio, fn):
+            raise BosunError(f"{radio.model} has no {name} control")
+        with self._lock:
+            getattr(radio, fn)(float(pct))
 
     def disconnect(self) -> None:
         self.stop_scan()

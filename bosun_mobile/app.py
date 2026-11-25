@@ -8,9 +8,8 @@ import functools
 import toga
 from toga.style.pack import COLUMN, ROW, Pack
 
+from bosun.control import Controller, describe_catalogue, format_status, models, modes_for
 from bosun.version import __version__
-
-from .controller import Controller, describe_catalogue, format_status, models, modes_for
 
 GAP = 6
 

@@ -1,30 +1,26 @@
 # Bosun packages
 
-Bosun is a command-line radio-control application. The Windows desktop
-package adds a double-click launcher, not a GUI. Bosun Mobile (Android) is a
-small touch front end for tuning, status and range scanning.
+`.github/workflows/package.yml` builds every package on each push to `main`,
+on version tags (`v*`), and from Actions → Build Bosun Packages → Run workflow.
 
-## Automated builds
-
-`.github/workflows/package.yml` runs on every push to `main`, on version tags
-(`v*`), and from Actions → Build Bosun Desktop Packages → Run workflow.
-
-| Artifact | File | Contents |
+| Artifact | File | What it is |
 |---|---|---|
-| `Bosun-windows` | `Bosun-Windows-x64.zip` | standalone `Bosun.exe` |
-| `Bosun-windows` | `Bosun-Windows-Desktop.zip` | `Bosun.exe` + double-click launcher |
-| `Bosun-linux` | `Bosun-Linux-x86_64.tar.gz` | standalone executable + launcher |
+| `Bosun-windows` | `Bosun-Windows-x64.zip` | Portable: `Bosun.exe` (desktop app) + `bosun-cli.exe` |
+| `Bosun-windows` | `Bosun-Windows-Desktop-Setup.exe` | Installer: Start menu + desktop shortcut, per-user, no admin rights |
+| `Bosun-linux` | `Bosun-Linux-x86_64.tar.gz` | `Bosun` (desktop app), `bosun-cli`, `install.sh` adds it to the app menu |
 | `Bosun-android` | `Bosun-Mobile-Android.apk` | Bosun Mobile (debug-signed, sideload) |
 
-Each platform's binary must be built on that platform; do not rename one
-platform's build as another's.
+The desktop app connects over **USB serial** (COM port / `/dev/ttyUSB*`) or the
+**network** (TCP, e.g. ser2net). It covers tuning, mode, AF/RF/squelch levels,
+status, range scanning and device discovery.
 
-## Android notes
+Each platform's binary must be built on that platform.
 
-- The APK connects to radios **over the network** (TCP): use ser2net, a
-  LAN-to-serial adapter or a Wi-Fi serial bridge attached to the radio's CAT
-  port. Direct USB-serial from the phone is not supported yet.
-- The APK is debug-signed. Install it by allowing "Install unknown apps" for
-  your browser or file manager. A Play Store release needs a signed AAB
-  (`briefcase package android` with your own keystore).
-- Build locally: `pip install briefcase && briefcase create android && briefcase build android`.
+## Notes
+
+- Windows: builds are not code-signed, so SmartScreen may warn on first run
+  ("More info" → "Run anyway").
+- Linux: extract, then run `./install.sh`. For USB serial, your user must be in
+  the `dialout` group (`uucp` on Arch).
+- Android: network (TCP) only for now; install by allowing "Install unknown
+  apps". A Play Store release needs a signed AAB.

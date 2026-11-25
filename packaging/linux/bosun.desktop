@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Bosun
+GenericName=Radio Control
+Comment=Control Icom, Yaesu and AOR radios over USB serial or the network
+Exec=Bosun
+Icon=bosun
+Terminal=false
+Categories=HamRadio;Network;Utility;
+Keywords=radio;ham;cat;civ;scanner;

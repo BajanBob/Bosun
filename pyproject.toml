@@ -32,11 +32,14 @@ test = ["pytest>=7", "ruff>=0.5"]
 [project.scripts]
 bosun = "bosun.cli:main"
 
+[project.gui-scripts]
+bosun-gui = "bosun.gui:main"
+
 [tool.setuptools.packages.find]
 include = ["bosun", "bosun.*"]
 
 [tool.setuptools.package-data]
-bosun = ["profiles/*.json", "py.typed"]
+bosun = ["profiles/*.json", "assets/*.png", "py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

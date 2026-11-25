@@ -1,8 +1,6 @@
 import pytest
 
-from bosun.errors import BosunError
-from bosun.transport import NullTransport
-from bosun_mobile.controller import (
+from bosun.control import (
     Controller,
     describe_catalogue,
     format_status,
@@ -11,6 +9,8 @@ from bosun_mobile.controller import (
     parse_endpoint,
     parse_mhz,
 )
+from bosun.errors import BosunError
+from bosun.transport import NullTransport
 
 
 def test_models_and_modes():
