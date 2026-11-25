@@ -99,9 +99,10 @@ jobs:
 
       - name: Build APK
         # Briefcase installs its own Android SDK; ignore the runner's preinstalled one.
+        # "yes" accepts the Android SDK licences, which --no-input would decline.
         run: |
-          env -u ANDROID_HOME -u ANDROID_SDK_ROOT briefcase create android --no-input
-          env -u ANDROID_HOME -u ANDROID_SDK_ROOT briefcase build android --no-input
+          yes | env -u ANDROID_HOME -u ANDROID_SDK_ROOT briefcase create android
+          yes | env -u ANDROID_HOME -u ANDROID_SDK_ROOT briefcase build android
           mkdir -p apk
           find build -name "*.apk" -path "*outputs*" -exec cp {} apk/Bosun-Mobile-Android.apk \;
           ls -l apk
