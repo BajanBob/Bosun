@@ -579,6 +579,13 @@ class BosunApp(ttk.Frame):
     def tune_radio(self, hz: float) -> None:
         """Called by the spectrum view when a signal is clicked."""
         self.freq.set(f"{hz / 1e6:.6f}")
+        radio = self.ctl.radio
+        if radio is not None and radio.bands and not any(
+                lo <= hz <= hi for lo, hi in radio.bands):
+            bands = ", ".join(f"{lo / 1e6:g}-{hi / 1e6:g}" for lo, hi in radio.bands)
+            self.say(f"Selected {hz / 1e6:.5f} MHz on the spectrum. The {radio.model} cannot "
+                     f"tune there (it covers {bands} MHz), so only the SDR is listening.")
+            return
         if self.ctl.connected and not self.ctl.audio_only:
             self._bg(self.ctl.tune, self.freq.get(), None,
                      done=lambda st: (self._show_status(st),

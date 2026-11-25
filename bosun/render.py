@@ -161,14 +161,26 @@ class SpectrumView:
             wf = Image.fromarray(PALETTE[(norm * 255).astype(np.uint8)], "RGB")
             img.paste(wf, (self.left, self.spec_h))
 
-        for det in detections or []:
+        # Markers for every signal; text labels only where they fit, strongest
+        # first, on up to three rows, so labels never print over each other.
+        rows: list[list[tuple[float, float]]] = [[], [], []]
+        line_h = 13
+        for det in sorted(detections or [], key=lambda dd: -dd.snr_db):
             x = fx(det.center_hz)
             if not self.left <= x <= self.width:
                 continue
             half = max(det.bandwidth_hz / span * self.plot_w / 2, 2)
             colour = NEW if new_hz and det.center_hz in new_hz else MARK
             d.rectangle([x - half, top, x + half, top + 4], fill=colour)
-            d.text((x + 3, top + 6), det.kind, fill=colour, font=self.font)
+            label = det.kind
+            w = d.textlength(label, font=self.font) if hasattr(d, "textlength") else 7 * len(label)
+            lx0 = min(max(x + 3, self.left), self.width - w - 2)
+            lx1 = lx0 + w + 6
+            for r, used in enumerate(rows):
+                if all(lx1 < a or lx0 > b for a, b in used):
+                    used.append((lx0, lx1))
+                    d.text((lx0, top + 6 + r * line_h), label, fill=colour, font=self.font)
+                    break
         if marker_hz is not None and f0 <= marker_hz <= f1:
             x = fx(marker_hz)
             d.line([(x, top), (x, self.height - self.bottom)], fill=(255, 80, 80), width=1)

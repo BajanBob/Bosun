@@ -21,6 +21,8 @@ from .tips import tip
 
 PAD = 6
 DEMO = DemoSource.name
+IDLE_HINT = ("Hover over the spectrum to read frequency and level. Click a signal to select "
+             "it (and tune a connected radio). Double-click to re-centre.")
 SPANS = {"250 kHz": 0.25e6, "1 MHz": 1.024e6, "2 MHz": 2.048e6, "2.4 MHz": 2.4e6}
 NFFT = 2048
 
@@ -117,10 +119,10 @@ class SpectrumTab(ttk.Frame):
         body.grid(row=3, column=0, sticky="nsew", pady=(PAD, 0))
         self.canvas = tk.Canvas(body, height=380, background="#0c1624",
                                 highlightthickness=0, cursor="crosshair")
-        tip(self.canvas, "canvas")
+        # No pop-up tip here: the readout line below is the canvas's hover help.
         body.add(self.canvas, weight=3)
         self.canvas.bind("<Motion>", self._hover)
-        self.canvas.bind("<Leave>", lambda _e: self.readout.set(""))
+        self.canvas.bind("<Leave>", lambda _e: self.readout.set(IDLE_HINT))
         self.canvas.bind("<Button-1>", self._click)
         self.canvas.bind("<Double-Button-1>", self._recenter)
         self.canvas.bind("<Configure>", self._resized)
@@ -129,9 +131,10 @@ class SpectrumTab(ttk.Frame):
         body.add(lower, weight=2)
         lower.columnconfigure(0, weight=1)
         lower.rowconfigure(1, weight=1)
-        self.readout = tk.StringVar()
-        ttk.Label(lower, textvariable=self.readout, font=("TkFixedFont", 10)).grid(
-            row=0, column=0, sticky="w")
+        self.readout = tk.StringVar(value=IDLE_HINT)
+        self._readout_label = ttk.Label(lower, textvariable=self.readout, anchor="w",
+                                        wraplength=900, justify="left")
+        self._readout_label.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
         cols = ("freq", "type", "snr", "busy", "seen")
         self.table = ttk.Treeview(lower, columns=cols, show="headings", height=6)
         for c, label, w in (("freq", "Frequency (MHz)", 120), ("type", "Type", 150),
@@ -328,6 +331,7 @@ class SpectrumTab(ttk.Frame):
 
     def _resized(self, event) -> None:
         self.view.resize(event.width, event.height)
+        self._resized_readout(event.width)
 
     def _refresh_table(self) -> None:
         self.table.delete(*self.table.get_children())
@@ -347,13 +351,16 @@ class SpectrumTab(ttk.Frame):
         level = self.view.level_at(hz)
         text = f"{hz / 1e6:.5f} MHz"
         if level is not None:
-            text += f"   {level:.0f} dB"
+            text += f"  ·  {level:.0f} dB"
         for d in self.detections:
             if abs(d.center_hz - hz) <= max(d.bandwidth_hz / 2, 1500):
-                text += (f"   >> {d.kind}: {d.hint}. ~{d.bandwidth_hz / 1e3:.1f} kHz wide, "
-                         f"{d.snr_db:.0f} dB above noise")
+                text += (f"  ·  {d.kind}, about {d.bandwidth_hz / 1e3:.1f} kHz wide, "
+                         f"{d.snr_db:.0f} dB above the noise. {d.hint}.")
                 break
         return text
+
+    def _resized_readout(self, width: int) -> None:
+        self._readout_label.configure(wraplength=max(300, width - 20))
 
     def _hover(self, event) -> None:
         hz = self.view.x_to_hz(event.x)

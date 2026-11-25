@@ -57,6 +57,28 @@ def classify(bandwidth_hz: float, peakiness_db: float = 0.0,
     return SIGNAL_TYPES[-1][1:]
 
 
+# Frequency ranges with the same use worldwide (ITU Radio Regulations), used to
+# give a more useful name than width alone. (lo Hz, hi Hz, min bw, max bw, kind, hint)
+BAND_CONTEXT = (
+    (76e6, 108e6, 40e3, 400e3, "Broadcast FM",
+     "FM radio station (76-108 MHz broadcast band)"),
+    (108e6, 137e6, 2e3, 30e3, "Airband",
+     "Aircraft or air traffic control (108-137 MHz, AM voice)"),
+    (156e6, 162.05e6, 4e3, 30e3, "Marine VHF",
+     "Ship or coast station (156-162 MHz, FM voice)"),
+    (161.9e6, 162.05e6, 4e3, 30e3, "AIS",
+     "Ship position data (AIS)"),
+)
+
+
+def band_context(center_hz: float, bandwidth_hz: float) -> tuple[str, str] | None:
+    """Name a signal by where it is, when width agrees. None if no match."""
+    for lo, hi, bw_lo, bw_hi, kind, hint in BAND_CONTEXT[::-1]:
+        if lo <= center_hz <= hi and bw_lo <= bandwidth_hz <= bw_hi:
+            return kind, hint
+    return None
+
+
 def psd(iq: np.ndarray, rate: float, nfft: int = 2048) -> tuple[np.ndarray, np.ndarray]:
     """Averaged power spectrum. Returns (offset_hz, power_db), DC centred."""
     iq = np.asarray(iq, dtype=np.complex64)
@@ -149,9 +171,25 @@ def detect(offsets_hz: np.ndarray, power_db: np.ndarray, center_hz: float = 0.0,
         weights = 10 ** (seg / 10)
         centroid = float(np.sum(offsets_hz[lo: hi + 1] * weights) / np.sum(weights))
         kind, hint = classify(bw, peaky, bin_hz)
+        ctx = band_context(center_hz + centroid, bw) if center_hz + centroid > 1e6 else None
+        if ctx is not None:
+            kind, hint = ctx
         out.append(Detection(
             center_hz=center_hz + centroid, bandwidth_hz=bw,
             peak_db=float(power_db[peak]), snr_db=float(power_db[peak] - floor[peak]),
             kind=kind, hint=hint, peakiness_db=peaky,
         ))
-    return sorted(out, key=lambda d: -d.snr_db)
+    return _drop_skirts(sorted(out, key=lambda d: -d.snr_db))
+
+
+def _drop_skirts(found: list[Detection]) -> list[Detection]:
+    """Drop weak 'signals' that are really the edges of a much stronger one."""
+    kept: list[Detection] = []
+    for d in found:  # strongest first
+        shadow = any(
+            abs(d.center_hz - k.center_hz) <= k.bandwidth_hz * 1.5 + d.bandwidth_hz
+            and k.snr_db - d.snr_db >= 20
+            for k in kept)
+        if not shadow:
+            kept.append(d)
+    return kept

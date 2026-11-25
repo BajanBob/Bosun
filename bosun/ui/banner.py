@@ -17,7 +17,7 @@ class Banner(tk.Frame):
         self.text.pack(side="left", fill="x", expand=True)
         self.buttons = tk.Frame(self, background=COLOURS["info"])
         self.buttons.pack(side="right")
-        self.visible = False
+        self.visible = True  # gridded by the owner; hide() removes it
 
     def show(self, text: str, actions=(), kind: str = "info") -> None:
         colour = COLOURS.get(kind, COLOURS["info"])
@@ -32,6 +32,7 @@ class Banner(tk.Frame):
         if not self.visible:
             self.grid()
             self.visible = True
+        self.lift()
 
     def hide(self) -> None:
         if self.visible:

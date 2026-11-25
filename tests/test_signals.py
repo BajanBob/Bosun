@@ -86,3 +86,31 @@ def test_demo_source_is_realtime_safe():
     t = time.time()
     src.read(16384)
     assert time.time() - t < 1.0
+
+
+def test_band_context_names():
+    assert dsp.band_context(100.7e6, 120e3)[0] == "Broadcast FM"
+    assert dsp.band_context(121.5e6, 8e3)[0] == "Airband"
+    assert dsp.band_context(156.8e6, 12e3)[0] == "Marine VHF"
+    assert dsp.band_context(162.0e6, 12e3)[0] == "AIS"
+    assert dsp.band_context(145.5e6, 12e3) is None
+    assert dsp.band_context(100.7e6, 1e3) is None  # a carrier in the FM band stays generic
+
+
+def test_labels_never_overlap():
+    from bosun.render import SpectrumView
+
+    view = SpectrumView(600, 300)
+    f = np.linspace(800e6, 802e6, 2048)
+    view.push(f, np.full(2048, -60.0))
+    dets = [dsp.Detection(800e6 + i * 3e3, 2e3, -30, 20 - i, "Narrow signal", "")
+            for i in range(12)]
+    img = view.image(detections=dets)
+    assert img.size == (600, 300)
+
+
+def test_skirts_of_strong_station_are_not_signals():
+    strong = dsp.Detection(100.1e6, 150e3, -10, 45, "Broadcast FM", "")
+    skirt = dsp.Detection(100.24e6, 3e3, -40, 10, "Narrow signal", "")
+    far = dsp.Detection(101.5e6, 3e3, -40, 10, "Narrow signal", "")
+    assert dsp._drop_skirts([strong, skirt, far]) == [strong, far]
