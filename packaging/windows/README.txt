@@ -8,5 +8,11 @@ USB serial radios need the USB driver for your interface (Silicon Labs CP210x,
 FTDI or the radio maker's driver). The COM port is shown in Device Manager under
 "Ports (COM & LPT)".
 
+RTL-SDR dongles: install the WinUSB driver once with Zadig (zadig.akeo.ie),
+choosing "Bulk-In, Interface (Interface 0)".
+
+Recordings and spectrum captures are saved in "Bosun Recordings" in your user
+folder. Setup > Setup wizard walks you through radio, SDR and audio.
+
 Windows may show a SmartScreen warning the first time because the app is not
 code-signed. Choose "More info" then "Run anyway".

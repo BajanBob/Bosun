@@ -1,4 +1,4 @@
-"""Wire protocols: CI-V, Yaesu ASCII CAT, AOR."""
+"""Wire protocols: CI-V, Yaesu/Kenwood ASCII CAT, AOR, configurable ASCII."""
 
 from __future__ import annotations
 
@@ -76,22 +76,26 @@ class CivCodec(Codec):
 
 
 class AsciiCatCodec(Codec):
-    """Yaesu ASCII CAT. Five-byte minimum, semicolon-terminated."""
+    """Yaesu / Kenwood ASCII CAT: two-letter command, parameters, ';' terminator.
+
+    Commands vary in length ("FA;" reads, "FA014250000;" sets), so only the
+    two-letter command is enforced.
+    """
 
     TERM = b";"
-    MIN_BODY = 11
 
     def frame(self, cmd: bytes, payload: bytes = b"") -> bytes:
-        body = cmd + payload
-        if len(cmd) < 2 or len(body) < self.MIN_BODY:
-            raise ProtocolError(f"CAT frame requires a two-byte command and at least {self.MIN_BODY} body bytes")
-        return body + self.TERM
+        if len(cmd) < 2 or not cmd[:2].isalpha():
+            raise ProtocolError("CAT frame requires a two-letter command")
+        return cmd + payload + self.TERM
 
     def split(self, buffer: bytes) -> tuple[list[bytes], bytes]:
         frames = []
         while self.TERM in buffer:
             body, buffer = buffer.split(self.TERM, 1)
-            if len(body) >= self.MIN_BODY and len(body[:2]) == 2:
+            body = body.strip()
+            # "?" is the radio's "command not understood" reply.
+            if len(body) >= 2 and body[:2].isalpha():
                 frames.append(body)
         return frames, buffer
 
@@ -100,6 +104,24 @@ class AorCodec(Codec):
     """AOR ASCII, CR-terminated, unaddressed."""
 
     TERM = b"\r"
+
+    def frame(self, cmd: bytes, payload: bytes = b"") -> bytes:
+        return cmd + payload + self.TERM
+
+    def split(self, buffer: bytes) -> tuple[list[bytes], bytes]:
+        frames = []
+        while self.TERM in buffer:
+            body, buffer = buffer.split(self.TERM, 1)
+            if body.strip():
+                frames.append(body.strip())
+        return frames, buffer
+
+
+class LineCodec(Codec):
+    """Generic ASCII line protocol with a configurable terminator."""
+
+    def __init__(self, terminator: bytes = b"\r") -> None:
+        self.TERM = terminator or b"\r"
 
     def frame(self, cmd: bytes, payload: bytes = b"") -> bytes:
         return cmd + payload + self.TERM

@@ -98,9 +98,14 @@ class Controller:
                 raise BosunError("baud rate must be a number") from None
         return self._open(model, self._serial_factory(port, rate))
 
+    def connect_audio_only(self, model: str) -> dict:
+        """Radios with no PC control (e.g. Radtel RT-950 Pro)."""
+        return self._open(model, None)
+
     def _open(self, model: str, transport) -> dict:
         self.disconnect()
-        radio = DRIVERS[model](transport)
+        cls = DRIVERS[model]
+        radio = cls(transport) if transport is not None else cls()
         radio.connect()
         self.radio = radio
         return self.status()
@@ -131,8 +136,14 @@ class Controller:
         with self._lock:
             return self._need().status()
 
+    @property
+    def audio_only(self) -> bool:
+        return bool(getattr(self.radio, "audio_only", False))
+
     def tune(self, mhz: str, mode: str | None) -> dict:
         radio = self._need()
+        if self.audio_only:
+            raise BosunError(f"{radio.model} has no computer control; tune it on the radio")
         hz = parse_mhz(mhz)
         with self._lock:
             radio.set_frequency(hz)
@@ -172,6 +183,9 @@ def format_status(st: dict) -> str:
     freq = st.get("frequency")
     if isinstance(freq, (int, float)):
         freq = f"{freq / 1e6:.6f} MHz"
-    return (f"{st.get('model')} ({st.get('vendor')})\n"
+    text = (f"{st.get('model')} ({st.get('vendor')})\n"
             f"Connected: {'yes' if st.get('connected') else 'no'}\n"
             f"Frequency: {freq}\nMode: {st.get('mode')}")
+    if st.get("note"):
+        text += f"\n{st['note']}"
+    return text

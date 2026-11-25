@@ -25,7 +25,13 @@ class SoapyBackend(SDRBackend):
             import SoapySDR
         except ImportError:
             return []
-        return [f"{d['driver']}={d.get('serial', '')}" for d in SoapySDR.Device.enumerate()]
+        out = []
+        for d in SoapySDR.Device.enumerate():
+            args = f"driver={d['driver']}"
+            if d.get("serial"):
+                args += f",serial={d['serial']}"
+            out.append(args)
+        return out
 
     def open(self, device: str) -> None:
         try:
@@ -33,6 +39,8 @@ class SoapyBackend(SDRBackend):
             from SoapySDR import SOAPY_SDR_CF32, SOAPY_SDR_RX
         except ImportError as exc:
             raise _missing("SoapySDR") from exc
+        if device.startswith("soapy:"):
+            device = device[len("soapy:"):]
         self._dev = SoapySDR.Device(device)
         self._stream = self._dev.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32)
         self._dev.activateStream(self._stream)
@@ -92,19 +100,17 @@ class RTLBackend(SDRBackend):
     @classmethod
     def probe(cls) -> list[str]:
         try:
-            from rtlsdr import RtlSdr
-        except ImportError:
-            return []
-        try:
-            return [f"rtl:{i}" for i in range(RtlSdr.get_device_count())]
-        except Exception:
+            from rtlsdr.librtlsdr import librtlsdr as lib
+
+            return [f"rtl:{i}" for i in range(int(lib.rtlsdr_get_device_count()))]
+        except Exception:  # missing package or native librtlsdr
             return []
 
     def open(self, device: str) -> None:
         try:
             from rtlsdr import RtlSdr
-        except ImportError as exc:
-            raise _missing("pyrtlsdr") from exc
+        except Exception as exc:  # ImportError or librtlsdr failing to load
+            raise _missing(f"pyrtlsdr / librtlsdr ({exc})") from exc
         idx = int(device.split(":")[-1]) if ":" in device else 0
         self._sdr = RtlSdr(device_index=idx)
 

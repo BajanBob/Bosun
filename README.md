@@ -8,6 +8,13 @@ radios do the receiving, Bosun keeps the lines straight.
 
 ## Supported radios
 
+Built-in drivers are listed below; the app also covers IC-7300, IC-705,
+IC-7610, IC-7100, IC-R8600, IC-R75, FT-710, FTDX10, FTDX101D, FT-891, Kenwood
+TS-590SG / TS-890S / TS-480 / TS-2000, AOR AR-5000 / AR-DV1, Barrett and Harris
+(command profile) and Radtel RT-950 Pro (audio + channel export). See
+[BUILD-PACKAGES.md](BUILD-PACKAGES.md).
+
+
 | Model | Vendor | Control | Audio | TX |
 |---|---|---|---|---|
 | IC-9100 | Icom | CI-V 0x7C | USB codec | yes |
@@ -72,7 +79,9 @@ says otherwise. `BOSUN_MODEL`, `BOSUN_PORT`, `BOSUN_TCP`, `BOSUN_BAUD`,
 ## Status
 
 Tune, mode, VFO, memory, scan, gain, squelch, attenuator, preamp, AGC, filter,
-PTT and scope are implemented. No GUI, no demodulation, no decoders.
+PTT and scope are implemented. The desktop app adds a setup wizard, live
+spectrum, automatic signal detection, a cognitive receiver, sweeps and
+recording; Android has Bosun Mobile. No digital-mode decoders.
 
 ## Licence
 

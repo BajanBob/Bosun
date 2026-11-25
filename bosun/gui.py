@@ -2,35 +2,55 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import pathlib
 import queue
+import subprocess
+import sys
 import threading
 import tkinter as tk
 from tkinter import ttk
 
+from . import config
 from .control import (
     Controller,
     default_baud,
-    describe_catalogue,
     format_status,
-    models,
     modes_for,
     serial_ports,
 )
+from .radios import registry
+from .ui.tips import Tooltip, tip
 from .version import __version__
 
 PAD = 6
 ICON = pathlib.Path(__file__).with_name("assets") / "bosun.png"
 
 
+def open_folder(path: pathlib.Path) -> None:
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception:
+        pass
+
+
 class BosunApp(ttk.Frame):
-    def __init__(self, root: tk.Tk, controller: Controller | None = None) -> None:
+    def __init__(self, root: tk.Tk, controller: Controller | None = None,
+                 first_run_wizard: bool = True) -> None:
         super().__init__(root, padding=PAD * 2)
         self.root = root
         self.ctl = controller or Controller()
+        self.settings = config.read_settings()
+        Tooltip.enabled = bool(self.settings.get("hover_tips", True))
         self._results: queue.Queue = queue.Queue()
         root.title(f"Bosun {__version__}")
-        root.minsize(620, 520)
+        root.minsize(900, 640)
         try:
             self._icon = tk.PhotoImage(file=str(ICON))
             root.iconphoto(True, self._icon)
@@ -43,20 +63,53 @@ class BosunApp(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
+        self._build_menu()
         self._build_connection()
-        nb = ttk.Notebook(self)
-        nb.grid(row=1, column=0, sticky="nsew", pady=(PAD, 0))
-        nb.add(self._build_control(nb), text="Control")
-        nb.add(self._build_scan(nb), text="Scan")
-        nb.add(self._build_devices(nb), text="Devices")
-        nb.add(self._build_catalogue(nb), text="Radios")
+        self.nb = ttk.Notebook(self)
+        self.nb.grid(row=1, column=0, sticky="nsew", pady=(PAD, 0))
+        self.nb.add(self._build_control(self.nb), text="Control")
+        try:
+            from .ui.spectrum import SpectrumTab
+            self.spectrum = SpectrumTab(self.nb, self)
+            self.nb.add(self.spectrum, text="Spectrum")
+        except Exception as exc:  # Pillow missing etc.
+            self.spectrum = None
+            err = ttk.Label(self.nb, text=f"Spectrum unavailable: {exc}", padding=20)
+            self.nb.add(err, text="Spectrum")
+        self.nb.add(self._build_scan(self.nb), text="Scan")
+        from .ui.audio import AudioTab
+        self.audio_tab = AudioTab(self.nb, self)
+        self.nb.add(self.audio_tab, text="Audio")
+        self.nb.add(self._build_devices(self.nb), text="Devices")
+        self.nb.add(self._build_catalogue(self.nb), text="Radios")
         self.message = tk.StringVar(value="Not connected.")
         ttk.Label(self, textvariable=self.message, anchor="w").grid(
             row=2, column=0, sticky="ew", pady=(PAD, 0))
         self._refresh_ports()
+        self._apply_settings()
         self.after(50, self._drain)
+        if first_run_wizard and not self.settings.get("setup_done"):
+            self.after(300, self.open_wizard)
 
     # ---------- layout ----------
+    def _build_menu(self) -> None:
+        bar = tk.Menu(self.root)
+        setup = tk.Menu(bar, tearoff=False)
+        setup.add_command(label="Setup wizard...", command=self.open_wizard)
+        setup.add_command(label="Open recordings folder", command=self._open_recordings)
+        setup.add_separator()
+        setup.add_command(label="Quit", command=self.quit_app)
+        bar.add_cascade(label="Setup", menu=setup)
+        helpm = tk.Menu(bar, tearoff=False)
+        self.tips_var = tk.BooleanVar(value=Tooltip.enabled)
+        helpm.add_checkbutton(label="Show hover tips", variable=self.tips_var,
+                              command=self._toggle_tips)
+        helpm.add_command(label="About Bosun", command=lambda: self.say(
+            f"Bosun {__version__}: radio control, spectrum, detection and recording. "
+            "MIT licence."))
+        bar.add_cascade(label="Help", menu=helpm)
+        self.root.configure(menu=bar)
+
     def _build_connection(self) -> None:
         box = ttk.LabelFrame(self, text="Connection", padding=PAD)
         box.grid(row=0, column=0, sticky="ew")
@@ -64,45 +117,49 @@ class BosunApp(ttk.Frame):
             box.columnconfigure(c, weight=1)
 
         ttk.Label(box, text="Radio").grid(row=0, column=0, sticky="w")
-        self.model = tk.StringVar(value=models()[0])
-        cb = ttk.Combobox(box, textvariable=self.model, values=models(), state="readonly")
-        cb.grid(row=0, column=1, sticky="ew", padx=PAD)
-        cb.bind("<<ComboboxSelected>>", self._model_changed)
+        names = [m for ms in registry.vendors().values() for m in ms]
+        self.model = tk.StringVar(value=names[0])
+        self.model_box = tip(ttk.Combobox(box, textvariable=self.model, values=names,
+                                          state="readonly"), "radio")
+        self.model_box.grid(row=0, column=1, sticky="ew", padx=PAD)
+        self.model_box.bind("<<ComboboxSelected>>", self._model_changed)
 
         self.link = tk.StringVar(value="serial")
         links = ttk.Frame(box)
         links.grid(row=0, column=2, columnspan=2, sticky="w")
-        ttk.Radiobutton(links, text="USB / serial", value="serial", variable=self.link,
-                        command=self._link_changed).pack(side="left")
-        ttk.Radiobutton(links, text="Network (TCP)", value="tcp", variable=self.link,
-                        command=self._link_changed).pack(side="left", padx=PAD)
+        tip(ttk.Radiobutton(links, text="USB / serial", value="serial", variable=self.link,
+                            command=self._link_changed), "link_serial").pack(side="left")
+        tip(ttk.Radiobutton(links, text="Network (TCP)", value="tcp", variable=self.link,
+                            command=self._link_changed), "link_tcp").pack(side="left",
+                                                                           padx=PAD)
 
         self.serial_row = ttk.Frame(box)
         self.serial_row.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(PAD, 0))
         self.serial_row.columnconfigure(1, weight=1)
         ttk.Label(self.serial_row, text="Port").grid(row=0, column=0, sticky="w")
         self.port = tk.StringVar()
-        self.port_box = ttk.Combobox(self.serial_row, textvariable=self.port)
+        self.port_box = tip(ttk.Combobox(self.serial_row, textvariable=self.port), "port")
         self.port_box.grid(row=0, column=1, sticky="ew", padx=PAD)
-        ttk.Button(self.serial_row, text="Refresh", command=self._refresh_ports).grid(
-            row=0, column=2)
+        tip(ttk.Button(self.serial_row, text="Refresh", command=self._refresh_ports),
+            "refresh").grid(row=0, column=2)
         ttk.Label(self.serial_row, text="Baud").grid(row=0, column=3, padx=(PAD * 2, 0))
         self.baud = tk.StringVar(value=str(default_baud(self.model.get())))
-        ttk.Entry(self.serial_row, textvariable=self.baud, width=8).grid(
+        tip(ttk.Entry(self.serial_row, textvariable=self.baud, width=8), "baud").grid(
             row=0, column=4, padx=PAD)
 
         self.tcp_row = ttk.Frame(box)
         self.tcp_row.columnconfigure(1, weight=1)
         ttk.Label(self.tcp_row, text="Host / IP").grid(row=0, column=0, sticky="w")
         self.host = tk.StringVar()
-        ttk.Entry(self.tcp_row, textvariable=self.host).grid(
+        tip(ttk.Entry(self.tcp_row, textvariable=self.host), "host").grid(
             row=0, column=1, sticky="ew", padx=PAD)
         ttk.Label(self.tcp_row, text="TCP port").grid(row=0, column=2)
         self.tcp_port = tk.StringVar()
-        ttk.Entry(self.tcp_row, textvariable=self.tcp_port, width=8).grid(
+        tip(ttk.Entry(self.tcp_row, textvariable=self.tcp_port, width=8), "tcp_port").grid(
             row=0, column=3, padx=PAD)
 
-        self.connect_btn = ttk.Button(box, text="Connect", command=self._toggle_connect)
+        self.connect_btn = tip(ttk.Button(box, text="Connect", command=self._toggle_connect),
+                               "connect")
         self.connect_btn.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(PAD, 0))
 
     def _build_control(self, parent) -> ttk.Frame:
@@ -110,15 +167,15 @@ class BosunApp(ttk.Frame):
         f.columnconfigure(1, weight=1)
         ttk.Label(f, text="Frequency (MHz)").grid(row=0, column=0, sticky="w")
         self.freq = tk.StringVar()
-        e = ttk.Entry(f, textvariable=self.freq)
+        e = tip(ttk.Entry(f, textvariable=self.freq), "freq")
         e.grid(row=0, column=1, sticky="ew", padx=PAD)
         e.bind("<Return>", lambda _e: self._tune())
         ttk.Label(f, text="Mode").grid(row=0, column=2)
         self.mode = tk.StringVar()
-        self.mode_box = ttk.Combobox(f, textvariable=self.mode, state="readonly", width=8)
+        self.mode_box = tip(ttk.Combobox(f, textvariable=self.mode, state="readonly",
+                                         width=8), "mode")
         self.mode_box.grid(row=0, column=3, padx=PAD)
-        self._model_changed()
-        ttk.Button(f, text="Tune", command=self._tune).grid(row=0, column=4)
+        tip(ttk.Button(f, text="Tune", command=self._tune), "tune").grid(row=0, column=4)
 
         levels = ttk.LabelFrame(f, text="Levels (%)", padding=PAD)
         levels.grid(row=1, column=0, columnspan=5, sticky="ew", pady=PAD)
@@ -128,7 +185,7 @@ class BosunApp(ttk.Frame):
                                          ("squelch", "Squelch"))):
             ttk.Label(levels, text=text).grid(row=i, column=0, sticky="w")
             var = tk.DoubleVar(value=50)
-            s = ttk.Scale(levels, from_=0, to=100, variable=var)
+            s = tip(ttk.Scale(levels, from_=0, to=100, variable=var), key)
             s.grid(row=i, column=1, sticky="ew", padx=PAD)
             s.bind("<ButtonRelease-1>", lambda _e, k=key: self._set_level(k))
             val = ttk.Label(levels, width=4)
@@ -138,11 +195,12 @@ class BosunApp(ttk.Frame):
             var.set(50)
             self.levels[key] = var
 
-        ttk.Button(f, text="Read status", command=self._refresh).grid(
+        tip(ttk.Button(f, text="Read status", command=self._refresh), "status").grid(
             row=2, column=0, sticky="w")
         self.status = tk.Text(f, height=6, state="disabled", wrap="word")
         self.status.grid(row=3, column=0, columnspan=5, sticky="nsew", pady=(PAD, 0))
         f.rowconfigure(3, weight=1)
+        self._model_changed()
         return f
 
     def _build_scan(self, parent) -> ttk.Frame:
@@ -156,36 +214,48 @@ class BosunApp(ttk.Frame):
             r, c = divmod(i, 2)
             ttk.Label(f, text=text).grid(row=r, column=c * 2, sticky="w", pady=2)
             var = tk.StringVar(value=default)
-            ttk.Entry(f, textvariable=var).grid(row=r, column=c * 2 + 1, sticky="ew",
-                                                padx=PAD)
+            tip(ttk.Entry(f, textvariable=var), f"scan_{key}").grid(
+                row=r, column=c * 2 + 1, sticky="ew", padx=PAD)
             self.scan_vars[key] = var
-        self.scan_btn = ttk.Button(f, text="Start scan", command=self._toggle_scan)
+        self.scan_btn = tip(ttk.Button(f, text="Start scan", command=self._toggle_scan),
+                            "scan_go")
         self.scan_btn.grid(row=2, column=0, columnspan=4, sticky="ew", pady=PAD)
         self.scan_now = tk.StringVar(value="Idle")
         ttk.Label(f, textvariable=self.scan_now).grid(row=3, column=0, columnspan=4,
                                                       sticky="w")
-        self.hits = tk.Listbox(f, height=10)
+        self.hits = tip(tk.Listbox(f, height=10), "hits")
         self.hits.grid(row=4, column=0, columnspan=4, sticky="nsew", pady=(PAD, 0))
         self.hits.bind("<Double-Button-1>", self._tune_to_hit)
-        ttk.Label(f, text="Hits are logged when the radio reports open squelch. "
-                          "Double-click a hit to tune to it.").grid(
-            row=5, column=0, columnspan=4, sticky="w")
         f.rowconfigure(4, weight=1)
         return f
 
     def _build_devices(self, parent) -> ttk.Frame:
         f = ttk.Frame(parent, padding=PAD)
-        ttk.Button(f, text="Scan for devices", command=self._probe).pack(anchor="w")
+        tip(ttk.Button(f, text="Scan for devices", command=self._probe), "probe").pack(
+            anchor="w")
         self.devices = tk.Text(f, height=12, state="disabled")
         self.devices.pack(fill="both", expand=True, pady=(PAD, 0))
         return f
 
     def _build_catalogue(self, parent) -> ttk.Frame:
         f = ttk.Frame(parent, padding=PAD)
-        t = tk.Text(f, wrap="word")
-        t.insert("1.0", describe_catalogue())
-        t.configure(state="disabled")
-        t.pack(fill="both", expand=True)
+        cols = ("vendor", "model", "control", "bands", "modes")
+        tree = ttk.Treeview(f, columns=cols, show="headings")
+        for c, label, w in (("vendor", "Maker", 80), ("model", "Model", 120),
+                            ("control", "Control", 140), ("bands", "Bands (MHz)", 260),
+                            ("modes", "Modes", 260)):
+            tree.heading(c, text=label)
+            tree.column(c, width=w, anchor="w")
+        for e in sorted(registry.catalogue(), key=lambda e: (e["vendor"], e["model"])):
+            bands = ", ".join(f"{lo:g}-{hi:g}" for lo, hi in e["bands_mhz"])
+            tree.insert("", "end", values=(e["vendor"], e["model"], e["control"], bands,
+                                           " ".join(e["modes"])))
+        tree.pack(fill="both", expand=True)
+        ttk.Label(f, foreground="#555", wraplength=760, justify="left", text=(
+            "Built in: Bosun talks to the radio directly. Profile: you copy the commands "
+            "from the radio's remote-control manual once (Setup wizard). Audio only: no PC "
+            "control; record its audio and export channel lists.")).pack(anchor="w",
+                                                                         pady=PAD)
         return f
 
     # ---------- plumbing ----------
@@ -212,8 +282,14 @@ class BosunApp(ttk.Frame):
             pass
         self.after(50, self._drain)
 
-    def _post(self, fn, *args) -> None:
-        self._results.put((lambda _r: fn(*args), None, None, None))
+    def post(self, fn, *args, **kwargs) -> None:
+        """Run fn on the UI thread (safe from worker threads)."""
+        self._results.put((lambda _r: fn(*args, **kwargs), None, None, None))
+
+    _post = post
+
+    def say(self, text: str) -> None:
+        self.message.set(text)
 
     @staticmethod
     def _set_text(widget: tk.Text, text: str) -> None:
@@ -222,14 +298,61 @@ class BosunApp(ttk.Frame):
         widget.insert("1.0", text)
         widget.configure(state="disabled")
 
+    # ---------- settings / wizard ----------
+    def _apply_settings(self) -> None:
+        s = self.settings
+        if s.get("model") in registry.DRIVERS:
+            self.model.set(s["model"])
+            self._model_changed()
+        if s.get("tcp"):
+            self.link.set("tcp")
+            host, _, port = s["tcp"].partition(":")
+            self.host.set(host)
+            self.tcp_port.set(port)
+        elif s.get("port"):
+            self.port.set(s["port"])
+        if s.get("baud"):
+            self.baud.set(str(s["baud"]))
+        self._link_changed()
+
+    def open_wizard(self) -> None:
+        from .ui.wizard import SetupWizard
+
+        def done(_updates, path):
+            self.settings = config.read_settings()
+            Tooltip.enabled = bool(self.settings.get("hover_tips", True))
+            self.tips_var.set(Tooltip.enabled)
+            names = [m for ms in registry.vendors().values() for m in ms]
+            self.model_box.configure(values=names)
+            self._apply_settings()
+            if self.spectrum is not None and self.settings.get("sdr"):
+                self.spectrum.src_name.set(self.settings["sdr"])
+            if self.settings.get("audio_input"):
+                self.audio_tab.device.set(self.settings["audio_input"])
+            self.say(f"Settings saved to {path}. Press Connect.")
+
+        SetupWizard(self.root, on_done=done)
+
+    def _toggle_tips(self) -> None:
+        Tooltip.enabled = bool(self.tips_var.get())
+        with contextlib.suppress(Exception):
+            config.save_settings({"hover_tips": Tooltip.enabled})
+
+    def _open_recordings(self) -> None:
+        from .recorder import recordings_dir
+        open_folder(recordings_dir())
+
     # ---------- handlers ----------
     def _model_changed(self, _event=None) -> None:
+        if not hasattr(self, "mode_box"):
+            return
         modes = modes_for(self.model.get())
         self.mode_box.configure(values=modes)
         if self.mode.get() not in modes:
             self.mode.set(modes[0] if modes else "")
-        if hasattr(self, "baud"):
-            self.baud.set(str(default_baud(self.model.get())))
+        self.baud.set(str(default_baud(self.model.get())))
+        if hasattr(self, "message"):
+            self.say(registry.describe(self.model.get()))
 
     def _link_changed(self) -> None:
         if self.link.get() == "serial":
@@ -264,18 +387,29 @@ class BosunApp(ttk.Frame):
             self.connect_btn.configure(text="Disconnect")
             self.connect_btn.state(["!disabled"])
             self._show_status(st)
-            self.message.set(f"Connected to {st.get('model')}.")
+            self.message.set(st.get("note") or f"Connected to {st.get('model')}.")
 
         def fail(_exc):
             self.connect_btn.state(["!disabled"])
 
         self.message.set("Connecting...")
-        if self.link.get() == "serial":
-            self._bg(self.ctl.connect_serial, self.model.get(), self.port.get(),
+        model = self.model.get()
+        if getattr(registry.get(model), "audio_only", False):
+            self._bg(self.ctl.connect_audio_only, model, done=done, fail=fail)
+        elif self.link.get() == "serial":
+            self._bg(self.ctl.connect_serial, model, self.port.get(),
                      self.baud.get(), done=done, fail=fail)
         else:
-            self._bg(self.ctl.connect, self.model.get(), self.host.get(),
+            self._bg(self.ctl.connect, model, self.host.get(),
                      self.tcp_port.get(), done=done, fail=fail)
+
+    def tune_radio(self, hz: float) -> None:
+        """Called by the spectrum view when a signal is clicked."""
+        self.freq.set(f"{hz / 1e6:.6f}")
+        if self.ctl.connected and not self.ctl.audio_only:
+            self._bg(self.ctl.tune, self.freq.get(), None,
+                     done=lambda st: (self._show_status(st),
+                                      self.say(f"Radio tuned to {hz / 1e6:.5f} MHz.")))
 
     def _tune(self) -> None:
         def done(st):
@@ -299,8 +433,8 @@ class BosunApp(ttk.Frame):
             v = self.scan_vars
             self.ctl.start_scan(
                 v["start"].get(), v["stop"].get(), v["step"].get(), v["dwell"].get(),
-                on_step=lambda hz: self._post(self.scan_now.set, f"Scanning {hz / 1e6:.6f} MHz"),
-                on_hit=lambda hz: self._post(self.hits.insert, 0, f"{hz / 1e6:.6f} MHz"),
+                on_step=lambda hz: self.post(self.scan_now.set, f"Scanning {hz / 1e6:.6f} MHz"),
+                on_hit=lambda hz: self.post(self.hits.insert, 0, f"{hz / 1e6:.6f} MHz"),
             )
         except Exception as exc:
             self.message.set(f"Error: {exc}")
@@ -331,7 +465,7 @@ class BosunApp(ttk.Frame):
                           for b in bridges] or ["  none"]
             except Exception as exc:
                 lines.append(f"  unavailable: {exc}")
-            lines.append("USB audio codecs:")
+            lines.append("Sound devices:")
             try:
                 lines += [f"  {c}" for c in usb.list_codecs()] or ["  none"]
             except Exception as exc:
@@ -339,7 +473,8 @@ class BosunApp(ttk.Frame):
             lines.append("SDR devices:")
             try:
                 found = sdr.available()
-                lines += [f"  {k}: {d}" for k, devs in found.items() for d in devs] or ["  none"]
+                lines += [f"  {k}: {d}" for k, devs in found.items() if k != "file"
+                          for d in devs] or ["  none"]
             except Exception as exc:
                 lines.append(f"  unavailable: {exc}")
             return "\n".join(lines)
@@ -350,22 +485,36 @@ class BosunApp(ttk.Frame):
 
     def quit_app(self) -> None:
         try:
+            if self.spectrum is not None:
+                self.spectrum.shutdown()
+            self.audio_tab.shutdown()
             self.ctl.disconnect()
         finally:
             self.root.destroy()
 
 
 def main(argv: list[str] | None = None) -> int:
-    import sys
-
     args = sys.argv[1:] if argv is None else argv
+    selftest = "--selftest" in args
     root = tk.Tk()
-    app = BosunApp(root)
-    if "--selftest" in args:
-        # Build the window, let it draw, then exit cleanly. Used by CI.
-        root.after(1500, app.quit_app)
+    app = BosunApp(root, first_run_wizard=not selftest)
+    result = {"ok": True}
+    if selftest:
+        # Build the window, run the demo spectrum briefly, then exit. Used by CI:
+        # fails if the spectrum never draws.
+        if app.spectrum is not None:
+            app.spectrum.src_name.set("Demo (simulated signals)")
+            root.after(200, app.spectrum.toggle)
+
+        def finish():
+            drawn = getattr(app.spectrum, "frames_drawn", 0) if app.spectrum else 0
+            result["ok"] = drawn > 0
+            print(f"selftest: spectrum frames drawn = {drawn}")
+            app.quit_app()
+
+        root.after(3000, finish)
     root.mainloop()
-    return 0
+    return 0 if result["ok"] else 1
 
 
 if __name__ == "__main__":

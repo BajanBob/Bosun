@@ -107,3 +107,38 @@ def setup_logging(config: Config | None = None) -> logging.Logger:
 
 def default_bank_path(model: str) -> pathlib.Path:
     return _default_path().parent / "memory" / f"{model.replace('/', '-')}.json"
+
+
+def config_path() -> pathlib.Path:
+    """Where the desktop app keeps its settings."""
+    env = os.environ.get(CONFIG_ENV)
+    return pathlib.Path(env) if env else _default_path()
+
+
+def read_settings() -> dict:
+    path = config_path()
+    if not path.exists() or path.suffix == ".toml":
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_settings(updates: dict) -> pathlib.Path:
+    """Merge updates into the JSON settings file (None removes a key)."""
+    path = config_path()
+    if path.suffix == ".toml":
+        raise ConfigError(f"{path} is TOML; edit it by hand or set {CONFIG_ENV} to a .json file")
+    data = read_settings()
+    for key, value in updates.items():
+        if value is None:
+            data.pop(key, None)
+        else:
+            data[key] = value
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(path)
+    return path

@@ -31,23 +31,33 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install system audio library (Linux)
+        if: matrix.name == 'linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2 xvfb
+
       - name: Install dependencies
-        run: python -m pip install --upgrade pip pyinstaller .
+        run: python -m pip install --upgrade pip pyinstaller ".[desktop]"
 
       - name: Build desktop app and command-line tool
         shell: bash
         run: |
-          ICON=""
-          if [ "${{ matrix.name }}" = "windows" ]; then ICON="--icon packaging/windows/bosun.ico"; fi
-          pyinstaller --clean --noconfirm --onefile --windowed --name Bosun $ICON \
-            --collect-all bosun packaging/gui_entry.py
+          EXTRA=""
+          if [ "${{ matrix.name }}" = "windows" ]; then
+            EXTRA="--icon packaging/windows/bosun.ico"
+          else
+            PA=$(ldconfig -p | grep -m1 'libportaudio.so.2 ' | awk '{print $NF}')
+            EXTRA="--add-binary $PA:."
+          fi
+          pyinstaller --clean --noconfirm --onefile --windowed --name Bosun $EXTRA \
+            --collect-all bosun --collect-all pyrtlsdrlib --collect-all rtlsdr \
+            --collect-all sounddevice --hidden-import PIL._tkinter_finder \
+            packaging/gui_entry.py
           pyinstaller --noconfirm --onefile --name bosun-cli \
             --collect-all bosun packaging/entry.py
 
       - name: Smoke test (Linux)
         if: matrix.name == 'linux'
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
           ./dist/bosun-cli --version
           xvfb-run -a ./dist/Bosun --selftest
 
@@ -85,6 +95,7 @@ jobs:
           cp packaging/linux/bosun.desktop packaging/linux/install.sh packaging/linux/uninstall.sh package/
           chmod +x package/Bosun package/bosun-cli package/*.sh
           tar -czf Bosun-Linux-x86_64.tar.gz -C package .
+          (cd package && zip -q -r ../Bosun-Linux-x86_64.zip .)
 
       - name: Upload build files
         uses: actions/upload-artifact@v4
@@ -94,6 +105,7 @@ jobs:
             Bosun-Windows-x64.zip
             Bosun-Windows-Desktop-Setup.exe
             Bosun-Linux-x86_64.tar.gz
+            Bosun-Linux-x86_64.zip
           if-no-files-found: error
 
   android:

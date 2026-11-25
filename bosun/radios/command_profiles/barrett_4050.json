@@ -1,0 +1,36 @@
+{
+  "model": "Barrett 4050",
+  "vendor": "Barrett",
+  "baud": 9600,
+  "terminator": "\\r",
+  "receive_only": false,
+  "frequency_unit": "hz",
+  "bands_mhz": [
+    [
+      0.25,
+      30
+    ]
+  ],
+  "modes": {
+    "USB": "USB",
+    "LSB": "LSB",
+    "AM": "AM",
+    "CW": "CW"
+  },
+  "commands": {
+    "set_frequency": "",
+    "get_frequency": "",
+    "frequency_reply": "",
+    "set_mode": "",
+    "get_mode": "",
+    "mode_reply": "",
+    "squelch_open": "",
+    "squelch_open_reply": "",
+    "set_squelch": "",
+    "set_af_gain": "",
+    "set_rf_gain": "",
+    "ptt_on": "",
+    "ptt_off": ""
+  },
+  "notes": "Fill in the commands from this radio's remote-control (RS-232) manual. Bosun does not guess commands for this radio. Templates can use {hz}, {khz}, {mhz}, {mode}, {pct} and {val255}; replies are matched with regular expressions."
+}

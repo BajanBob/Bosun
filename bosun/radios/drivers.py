@@ -9,7 +9,14 @@ from ..errors import ProtocolError
 from ..memory import Memory
 from ..spectrum import parse_burst, scope_mode_code
 from .base import RadioBase
-from .protocols import AorCodec, AsciiCatCodec, CivCodec, bcd_decode, bcd_encode
+from .protocols import (
+    AorCodec,
+    AsciiCatCodec,
+    CivCodec,
+    LineCodec,
+    bcd_decode,
+    bcd_encode,
+)
 
 CIV_FREQ = b"\x00"
 CIV_MODE = b"\x01"
@@ -227,10 +234,10 @@ class FT991A(RadioBase):
         return float(self._query(b"FA")[0][2:11])
 
     def _do_set_mode(self, code) -> None:
-        self._send(b"MD", code.encode())
+        self._send(b"MD0", code.encode())
 
     def _do_get_mode(self):
-        return self._query(b"MD")[0][2:3].decode()
+        return self._query(b"MD0")[0][3:4].decode()
 
     def _do_ptt(self, on: bool) -> None:
         self._send(b"TX", b"1" if on else b"0")
@@ -387,3 +394,172 @@ class AR8200(AorBase):
 class AR8600(AorBase):
     model = "AR-8600"
     bands = [(0.1e6, 3000e6)]
+
+
+# ---------------------------------------------------------------- more Icom
+ICOM_HF = (
+    Cap.RX | Cap.TX | Cap.TUNE | Cap.MODE | Cap.FILTER | Cap.AGC
+    | Cap.SQUELCH | Cap.ATTENUATOR | Cap.PREAMP | Cap.RF_GAIN
+    | Cap.AF_GAIN | Cap.PTT | Cap.VFO | Cap.MEMORY | Cap.SCAN
+    | Cap.USB_AUDIO | Cap.USB_SERIAL
+)
+ICOM_RX = (
+    Cap.RX | Cap.TUNE | Cap.MODE | Cap.FILTER | Cap.AGC | Cap.SQUELCH
+    | Cap.ATTENUATOR | Cap.PREAMP | Cap.RF_GAIN | Cap.AF_GAIN | Cap.MEMORY
+    | Cap.SCAN | Cap.USB_SERIAL
+)
+
+
+def _icom(name: str, addr: int, caps, bands, baud: int = 19200):
+    def __init__(self, transport, **kw):
+        IcomBase.__init__(self, transport, addr=addr, **kw)
+
+    return type(name.replace("-", ""), (IcomBase,), {
+        "model": name, "caps": caps, "bands": bands, "default_baud": baud,
+        "__init__": __init__, "__doc__": f"Icom {name}, CI-V address 0x{addr:02X}.",
+    })
+
+
+IC7300 = _icom("IC-7300", 0x94, ICOM_HF, [(0.03e6, 74.8e6)], 115200)
+IC705 = _icom("IC-705", 0xA4, ICOM_HF | Cap.DV,
+              [(0.03e6, 199.999e6), (400e6, 470e6)], 115200)
+IC7610 = _icom("IC-7610", 0x98, ICOM_HF, [(0.03e6, 60e6)], 115200)
+IC7100 = _icom("IC-7100", 0x88, ICOM_HF | Cap.DV,
+               [(0.03e6, 199.999e6), (400e6, 470e6)])
+ICR8600 = _icom("IC-R8600", 0x96, ICOM_RX, [(0.01e6, 3000e6)], 115200)
+ICR75 = _icom("IC-R75", 0x5A, ICOM_RX, [(0.03e6, 60e6)], 9600)
+
+
+# ---------------------------------------------------------------- more Yaesu
+def _yaesu(name: str, bands, baud: int = 38400):
+    return type(name.replace("-", ""), (FT991A,), {
+        "model": name, "bands": bands, "default_baud": baud,
+        "__doc__": f"Yaesu {name} (new CAT command set).",
+    })
+
+
+FT710 = _yaesu("FT-710", [(0.03e6, 56e6)])
+FTDX10 = _yaesu("FTDX10", [(0.03e6, 56e6)])
+FTDX101D = _yaesu("FTDX101D", [(0.03e6, 56e6)])
+FT891 = _yaesu("FT-891", [(0.03e6, 56e6)])
+
+
+# ---------------------------------------------------------------- Kenwood
+class KenwoodBase(RadioBase):
+    """Kenwood PC-control commands (TS-480/590/890/990/2000 family)."""
+
+    vendor = "Kenwood"
+    caps = (
+        Cap.RX | Cap.TX | Cap.TUNE | Cap.MODE | Cap.SQUELCH | Cap.RF_GAIN
+        | Cap.AF_GAIN | Cap.PTT | Cap.VFO | Cap.USB_SERIAL
+    )
+    transport_kind = "usb-serial"
+    default_baud = 9600
+    modes = {"LSB": "1", "USB": "2", "CW": "3", "FM": "4", "AM": "5",
+             "FSK": "6", "CW-R": "7", "FSK-R": "9"}
+    bands = [(0.03e6, 60e6)]
+
+    def __init__(self, transport, **kw) -> None:
+        super().__init__(transport, AsciiCatCodec(), **kw)
+
+    def _do_set_frequency(self, hz: float) -> None:
+        self._send(b"FA", f"{round(hz):011d}".encode())
+
+    def _do_get_frequency(self) -> float:
+        body = self._query(b"FA")[0]
+        digits = re.sub(rb"[^0-9]", b"", body[2:])
+        if not digits:
+            raise ProtocolError(f"{self.model}: unparsable frequency {body!r}")
+        return float(digits)
+
+    def _do_set_mode(self, code) -> None:
+        self._send(b"MD", code.encode())
+
+    def _do_get_mode(self):
+        return self._query(b"MD")[0][2:3].decode()
+
+    def _do_ptt(self, on: bool) -> None:
+        self._send(b"TX" if on else b"RX")
+
+    def _do_vfo_select(self, which: str) -> None:
+        self._send(b"FR", b"0" if which == "A" else b"1")
+
+    def _do_vfo_swap(self) -> None:
+        raise ProtocolError(f"{self.model}: VFO swap is not a PC command")
+
+    def _do_vfo_copy(self) -> None:
+        raise ProtocolError(f"{self.model}: VFO copy is not a PC command")
+
+    def _do_squelch_open(self):
+        # BY: busy (squelch open) indicator.
+        body = self._query(b"BY")[0]
+        return b"1" in body[2:]
+
+    def set_af_gain(self, pct: float) -> None:
+        self.require(Cap.AF_GAIN)
+        self._send(b"AG0", f"{_pct(pct):03d}".encode())
+
+    def set_rf_gain(self, pct: float) -> None:
+        self.require(Cap.RF_GAIN)
+        self._send(b"RG", f"{_pct(pct):03d}".encode())
+
+    def set_squelch(self, pct: float) -> None:
+        self.require(Cap.SQUELCH)
+        self._send(b"SQ0", f"{_pct(pct):03d}".encode())
+
+
+def _kenwood(name: str, bands, baud: int = 9600):
+    return type(name.replace("-", ""), (KenwoodBase,), {
+        "model": name, "bands": bands, "default_baud": baud,
+        "__doc__": f"Kenwood {name}.",
+    })
+
+
+TS590SG = _kenwood("TS-590SG", [(0.03e6, 60e6)], 115200)
+TS890S = _kenwood("TS-890S", [(0.03e6, 60e6)], 115200)
+TS480 = _kenwood("TS-480", [(0.03e6, 60e6)], 9600)
+TS2000 = _kenwood("TS-2000", [(0.03e6, 60e6), (142e6, 152e6), (420e6, 450e6),
+                              (1240e6, 1300e6)], 9600)
+
+
+# ---------------------------------------------------------------- more AOR
+class AR5000(AorBase):
+    model = "AR-5000"
+    bands = [(0.01e6, 2600e6)]
+
+
+class ARDV1(AorBase):
+    model = "AR-DV1"
+    bands = [(0.1e6, 1300e6)]
+
+
+# ---------------------------------------------------------------- Radtel
+class RadtelRT950Pro(RadioBase):
+    """Radtel RT-950 Pro: no live PC control.
+
+    The radio is programmed with Radtel's CPS (or CHIRP when supported). Bosun
+    records its audio through the computer's sound input and exports channel
+    lists as CHIRP CSV.
+    """
+
+    model = "RT-950 Pro"
+    vendor = "Radtel"
+    caps = Cap.RX | Cap.TX | Cap.USB_AUDIO
+    transport_kind = "none"
+    modes = {"FM": "FM", "NFM": "NFM", "AM": "AM"}
+    bands = [(108e6, 180e6), (200e6, 260e6), (350e6, 520e6)]
+    max_channel = 999
+    audio_only = True
+
+    def __init__(self, transport=None, **kw) -> None:
+        from ..transport import NullTransport
+
+        super().__init__(transport or NullTransport(), LineCodec(), **kw)
+
+    def status(self) -> dict:
+        return {
+            "model": self.model, "vendor": self.vendor, "caps": self.caps.name,
+            "connected": True, "frequency": "set on the radio",
+            "mode": "set on the radio",
+            "note": "No computer control: use Audio capture and Export channels.",
+        }

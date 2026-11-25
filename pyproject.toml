@@ -28,6 +28,7 @@ soapy = ["SoapySDR"]
 rtl = ["pyrtlsdr"]
 airspy = ["airspy"]
 test = ["pytest>=7", "ruff>=0.5"]
+desktop = ["pillow>=10", "sounddevice>=0.4.6", "pyrtlsdr>=0.3", "pyrtlsdrlib>=0.0.3"]
 
 [project.scripts]
 bosun = "bosun.cli:main"
@@ -39,7 +40,7 @@ bosun-gui = "bosun.gui:main"
 include = ["bosun", "bosun.*"]
 
 [tool.setuptools.package-data]
-bosun = ["profiles/*.json", "assets/*.png", "py.typed"]
+bosun = ["profiles/*.json", "assets/*.png", "radios/command_profiles/*.json", "py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
