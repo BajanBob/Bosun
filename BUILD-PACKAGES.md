@@ -24,7 +24,10 @@ on version tags (`v*`), and from Actions → Build Bosun Packages → Run workfl
 - **Automatic signal detection** with plain-language labels (CW, SSB, AM, FM,
   broadcast, wideband...), and a **cognitive receiver** that learns the noise
   floor, logs every signal with how busy it is, and flags new ones.
-- **Sweep** ranges wider than one view and log what is found.
+- **Wide spans**: an RTL-SDR streams about 2.4 MHz at once (its hardware
+  limit). The 5 / 10 / 20 / 40 MHz "(sweep)" spans step it across the range
+  and stitch one live picture (slower refresh; recording needs 2.4 MHz or
+  less). **Sweep** covers any range and logs what is found.
 - **Recording**: IQ (SigMF), demodulated audio (WAV), radio audio from any sound
   input (WAV), spectrum screen captures (PNG). Saved in `Bosun Recordings` in
   your home folder.

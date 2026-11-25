@@ -98,6 +98,9 @@ def test_band_context_names():
 
 
 def test_labels_never_overlap():
+    import pytest
+
+    pytest.importorskip("PIL")
     from bosun.render import SpectrumView
 
     view = SpectrumView(600, 300)

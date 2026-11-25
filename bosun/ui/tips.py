@@ -45,7 +45,9 @@ TIPS = {
               "which simulates a busy band so you can try everything without hardware.",
     "find_sdrs": "Search for plugged-in SDRs (RTL-SDR, SoapySDR devices, Airspy).",
     "center": "Centre of the view in MHz. Double-click the waterfall to re-centre there.",
-    "span": "How wide a slice to show. Narrower spans show more detail (and tell AM from FM).",
+    "span": "How wide a slice to show. An RTL-SDR sees up to 2.4 MHz at once; the "
+            "'(sweep)' spans step it across a wider range and stitch the picture (slower "
+            "refresh). Narrower spans show more detail and tell AM from FM.",
     "gain": "SDR gain in dB. Raise it for weak signals; lower it if the waterfall turns "
             "bright everywhere (overload).",
     "run": "Start or stop the live spectrum and waterfall.",

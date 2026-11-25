@@ -23,7 +23,10 @@ PAD = 6
 DEMO = DemoSource.name
 IDLE_HINT = ("Hover over the spectrum to read frequency and level. Click a signal to select "
              "it (and tune a connected radio). Double-click to re-centre.")
-SPANS = {"250 kHz": 0.25e6, "1 MHz": 1.024e6, "2 MHz": 2.048e6, "2.4 MHz": 2.4e6}
+SPANS = {"250 kHz": 0.25e6, "1 MHz": 1.024e6, "2 MHz": 2.048e6, "2.4 MHz": 2.4e6,
+         "5 MHz (sweep)": 5e6, "10 MHz (sweep)": 10e6, "20 MHz (sweep)": 20e6,
+         "40 MHz (sweep)": 40e6}
+SWEEP_STEP_RATE = 2.048e6  # per-step rate when sweeping wider than the device
 NFFT = 2048
 
 
@@ -54,8 +57,13 @@ class SpectrumTab(ttk.Frame):
     def _sync_opts(self) -> None:
         """Copy Tk settings into plain values for the worker threads (Tk is not
         thread-safe)."""
+        try:
+            center = self._center_hz()
+        except ValueError:
+            center = self._opts.get("center", 145e6) if getattr(self, "_opts", None) else 145e6
         self._opts = {"span": self.span.get(), "auto": bool(self.auto.get()),
-                      "cog": bool(self.cognitive.get()), "sens": float(self.sens.get())}
+                      "cog": bool(self.cognitive.get()), "sens": float(self.sens.get()),
+                      "center": center}
 
     # ---------------------------------------------------------------- layout
     def _build(self) -> None:
@@ -79,7 +87,7 @@ class SpectrumTab(ttk.Frame):
         e.bind("<Return>", lambda _e: self.retune())
         ttk.Label(bar, text="Span").pack(side="left")
         self.span = tk.StringVar(value=settings.get("sdr_span", "2 MHz"))
-        tip(ttk.Combobox(bar, textvariable=self.span, values=list(SPANS), width=8,
+        tip(ttk.Combobox(bar, textvariable=self.span, values=list(SPANS), width=13,
                          state="readonly"), "span").pack(side="left", padx=(2, PAD))
         ttk.Label(bar, text="Gain").pack(side="left")
         self.gain = tk.DoubleVar(value=float(settings.get("sdr_gain", 30)))
@@ -187,6 +195,11 @@ class SpectrumTab(ttk.Frame):
                      "No SDRs found. Plug one in (and on Windows install the WinUSB "
                      "driver with Zadig), then press Find SDRs again.")
 
+    def _wide(self) -> bool:
+        src = self.source
+        return src is not None and SPANS.get(self.span.get(), 0) > getattr(
+            src, "max_rate", 2.4e6)
+
     def _center_hz(self) -> float:
         return float(self.center.get().replace(",", ".")) * 1e6
 
@@ -195,8 +208,11 @@ class SpectrumTab(ttk.Frame):
             self.stop()
             return
         try:
-            self.source = open_source(self.src_name.get(), self._center_hz(),
-                                      SPANS.get(self.span.get(), 2.048e6), self.gain.get())
+            rate = min(SPANS.get(self.span.get(), 2.048e6), 2.4e6)
+            if rate > 2.4e6 or SPANS.get(self.span.get(), 0) > 2.4e6:
+                rate = SWEEP_STEP_RATE
+            self.source = open_source(self.src_name.get(), self._center_hz(), rate,
+                                      self.gain.get())
         except Exception as exc:
             self.app.say(f"Could not start {self.src_name.get()}: {exc}")
             return
@@ -222,7 +238,9 @@ class SpectrumTab(ttk.Frame):
     def retune(self, hz: float | None = None) -> None:
         if hz is not None:
             self.center.set(f"{hz / 1e6:.4f}")
-        if self.source is not None:
+        self._sync_opts()
+        if self.source is not None and SPANS.get(self.span.get(), 0) <= getattr(
+                self.source, "max_rate", 2.4e6):
             try:
                 self.source.tune(self._center_hz())
             except Exception as exc:
@@ -243,6 +261,15 @@ class SpectrumTab(ttk.Frame):
             if src is None:
                 break
             want = SPANS.get(opts["span"], src.rate)
+            if want > getattr(src, "max_rate", 2.4e6):
+                self._run_wide(src, want, opts)
+                span_name = None  # force the rate back when leaving sweep mode
+                was_wide = True
+                continue
+            if locals().get("was_wide"):
+                was_wide = False
+                with contextlib.suppress(Exception):
+                    src.tune(opts["center"])
             if want != src.rate and opts["span"] != span_name:
                 span_name = opts["span"]
                 src.rate = want
@@ -277,6 +304,43 @@ class SpectrumTab(ttk.Frame):
             if src.name.startswith("Demo"):
                 time.sleep(0.05)
 
+    def _run_wide(self, src, span: float, opts: dict) -> None:
+        """One live pass of a span wider than the device: step and stitch."""
+        step_rate = min(SWEEP_STEP_RATE, getattr(src, "max_rate", 2.4e6))
+        if src.rate != step_rate:
+            src.rate = step_rate
+            if hasattr(src, "set_rate"):
+                with contextlib.suppress(Exception):
+                    src.set_rate(step_rate)
+        center = opts["center"]
+        lo, hi = center - span / 2, center + span / 2
+        try:
+            sw = Sweeper(src, max(lo, 1e5), hi, nfft=NFFT)
+            f, p = sw.sweep(settle_s=0.0 if src.name.startswith("Demo") else 0.03,
+                            stop_flag=self._stop.is_set)
+        except Exception as exc:
+            self.app.post(self.app.say, f"Wide view failed: {exc}")
+            self._stop.set()
+            return
+        finally:
+            with contextlib.suppress(Exception):
+                src.center_hz = center
+        if not len(f):
+            return
+        dets, floor = [], None
+        # Many more points in a wide view means more chances for noise to poke
+        # above the line, so demand a little more (about 3 dB) before calling it.
+        sens = max(0.0, opts["sens"] - 0.4)
+        if opts["auto"]:
+            if opts["cog"]:
+                self.cog.sensitivity = sens
+                dets = self.cog.process(f - center, p, center)
+                floor = None if self.cog.floor is None else self.cog.floor.copy()
+            else:
+                dets = dsp.detect(f - center, p, center, threshold_db=12 - 8 * sens)
+        with contextlib.suppress(queue.Full):
+            self.frames.put_nowait((f, p, dets, floor))
+
     # ---------------------------------------------------------------- display
     def _tick(self) -> None:
         self._sync_opts()
@@ -300,7 +364,11 @@ class SpectrumTab(ttk.Frame):
         new = {s.center_hz for s in self.cog.new_signals()} if self.cognitive.get() else set()
         title = ""
         if self.source is not None:
-            title = f"{self.source.name}  centre {self.source.center_hz / 1e6:.4f} MHz"
+            centre = self._opts.get("center", self.source.center_hz) if self._wide() \
+                else self.source.center_hz
+            title = f"{self.source.name}  centre {centre / 1e6:.4f} MHz"
+            if self._wide():
+                title += f"  ·  {self.span.get()}"
         img = self.view.image(detections=self.detections, floor_db=getattr(self, "_floor", None),
                               title=title, marker_hz=self.selected_hz,
                               new_hz=self._near_new(new))
@@ -413,6 +481,10 @@ class SpectrumTab(ttk.Frame):
         if self.source is None:
             self.app.say("Start the spectrum first.")
             return
+        if self._wide():
+            self.app.say("Recording needs a span of 2.4 MHz or less (wide spans hop "
+                         "between frequencies).")
+            return
         self.iq_rec = IQRecorder(self.source.center_hz, self.source.rate,
                                  description=f"Bosun capture from {self.source.name}")
         self.iq_btn.configure(text="Stop IQ")
@@ -427,6 +499,10 @@ class SpectrumTab(ttk.Frame):
             return
         if self.source is None or self.selected_hz is None:
             self.app.say("Start the spectrum and click a signal first.")
+            return
+        if self._wide():
+            self.app.say("Recording needs a span of 2.4 MHz or less: pick the signal, "
+                         "double-click to centre it, then choose a narrower span.")
             return
         if abs(self.selected_hz - self.source.center_hz) > self.source.rate / 2:
             self.app.say("The selected signal is outside the current view.")

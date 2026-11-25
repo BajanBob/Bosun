@@ -15,6 +15,7 @@ DEFAULT_RATE = 2.048e6
 class IQSource:
     name = "abstract"
     rate = DEFAULT_RATE
+    max_rate = 2.4e6  # widest span the device streams reliably; wider = sweep
     center_hz = 100e6
     min_hz, max_hz = 0.0, 6e9
 
@@ -112,6 +113,10 @@ class SDRSource(IQSource):
             caps = self._dev.caps
             if caps.max_hz:
                 self.min_hz, self.max_hz = caps.min_hz, caps.max_hz
+            # RTL-SDR advertises 3.2 MS/s but drops samples above ~2.4.
+            if caps.max_rate:
+                self.max_rate = min(caps.max_rate,
+                                    2.4e6 if self.spec.startswith("rtl") else caps.max_rate)
         except SDRUnavailable:
             raise
         except Exception as exc:
@@ -135,6 +140,12 @@ class SDRSource(IQSource):
         if self._dev is not None:
             with self._lock:
                 self._dev.set_gain(db)
+
+    def set_rate(self, rate: float) -> None:
+        self.rate = float(rate)
+        if self._dev is not None:
+            with self._lock:
+                self._dev.set_sample_rate(self.rate)
 
     def read(self, n: int) -> np.ndarray:
         if self._dev is None:
