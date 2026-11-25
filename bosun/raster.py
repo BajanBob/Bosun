@@ -48,14 +48,41 @@ def _resample_peak(power_db: np.ndarray, width: int) -> np.ndarray:
     return np.maximum.reduceat(power_db, np.minimum(edges[:-1], n - 1)).astype(np.float32)
 
 
-class Waterfall:
-    """Keeps history and draws spectrum (top) + waterfall (bottom)."""
+def make_palette(stops) -> np.ndarray:
+    """stops: [(position 0-1, (r, g, b)), ...] -> 256x3 uint8."""
+    pos = np.array([p for p, _ in stops], np.float32)
+    rgb = np.array([c for _, c in stops], np.float32)
+    x = np.linspace(0, 1, 256)
+    return np.stack([np.interp(x, pos, rgb[:, c]) for c in range(3)], axis=1).astype(np.uint8)
 
-    def __init__(self, width: int = 480, spec_h: int = 110, water_h: int = 170) -> None:
+
+class Waterfall:
+    """Keeps history and draws spectrum (top) + waterfall (bottom).
+
+    theme (optional): dict with any of bg, grid, trace, fill, mark, select
+    (RGB tuples) and palette (256x3 array).
+    """
+
+    def __init__(self, width: int = 480, spec_h: int = 110, water_h: int = 170,
+                 theme: dict | None = None) -> None:
         self.w, self.spec_h, self.water_h = width, spec_h, water_h
+        self.set_theme(theme)
         self.water = np.full((water_h, width), -120.0, np.float32)
         self.lo, self.hi = -100.0, -20.0
         self.freqs: np.ndarray | None = None
+
+    def set_theme(self, theme: dict | None) -> None:
+        t = theme or {}
+        self.c = {k: np.array(t.get(k, d), np.uint8) for k, d in (
+            ("bg", BG), ("grid", GRID), ("trace", TRACE), ("fill", FILL),
+            ("mark", MARK), ("select", SELECT))}
+        self.palette = np.asarray(t.get("palette", PALETTE), np.uint8)
+
+    def resize(self, width: int, spec_h: int, water_h: int) -> None:
+        if (width, spec_h, water_h) == (self.w, self.spec_h, self.water_h):
+            return
+        self.w, self.spec_h, self.water_h = max(16, width), max(8, spec_h), max(8, water_h)
+        self.water = np.full((self.water_h, self.w), self.lo, np.float32)
 
     def push(self, freqs_hz: np.ndarray, power_db: np.ndarray) -> None:
         row = _resample_peak(np.asarray(power_db, np.float32), self.w)
@@ -76,33 +103,36 @@ class Waterfall:
 
     def render(self, detections=(), selected_hz: float | None = None) -> np.ndarray:
         img = np.empty((self.spec_h + self.water_h, self.w, 3), np.uint8)
-        img[:] = BG
+        c = self.c
+        img[:] = c["bg"]
         rng = max(self.hi - self.lo, 1.0)
         # grid every 10 dB and every eighth of the width
         for db in range(int(np.ceil(self.lo / 10) * 10), int(self.hi) + 1, 10):
             y = int((1 - (db - self.lo) / rng) * (self.spec_h - 1))
             if 0 <= y < self.spec_h:
-                img[y, :] = GRID
-        img[: self.spec_h, :: max(1, self.w // 8)] = GRID
+                img[y, :] = c["grid"]
+        img[: self.spec_h, :: max(1, self.w // 8)] = c["grid"]
         # spectrum: filled area under the trace
         row = self.water[0]
+        if len(row) != self.w:
+            return img
         ys = ((1 - (row - self.lo) / rng) * (self.spec_h - 1)).clip(0, self.spec_h - 1)
         ys = ys.astype(int)
         yy = np.arange(self.spec_h)[:, None]
         below = yy >= ys[None, :]
-        img[: self.spec_h][below] = FILL
-        img[ys, np.arange(self.w)] = TRACE
+        img[: self.spec_h][below] = c["fill"]
+        img[ys, np.arange(self.w)] = c["trace"]
         # waterfall
         norm = ((self.water - self.lo) / rng).clip(0, 1)
-        img[self.spec_h:] = PALETTE[(norm * 255).astype(np.uint8)]
+        img[self.spec_h:] = self.palette[(norm * 255).astype(np.uint8)]
         for d in detections:
             x = self.x_of(d.center_hz)
             if x is not None:
-                img[0:6, max(0, x - 2): x + 3] = MARK
+                img[0:6, max(0, x - 2): x + 3] = c["mark"]
         if selected_hz is not None:
             x = self.x_of(selected_hz)
             if x is not None:
-                img[:, x] = SELECT
+                img[:, x] = c["select"]
         return img
 
     def png(self, detections=(), selected_hz: float | None = None) -> bytes:

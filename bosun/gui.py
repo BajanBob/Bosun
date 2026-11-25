@@ -108,6 +108,9 @@ class BosunApp(ttk.Frame):
         setup.add_separator()
         setup.add_command(label="Quit", command=self.quit_app)
         bar.add_cascade(label="Setup", menu=setup)
+        view = tk.Menu(bar, tearoff=False)
+        view.add_command(label="Faceplate (touch screen)", command=self.open_faceplate)
+        bar.add_cascade(label="View", menu=view)
         helpm = tk.Menu(bar, tearoff=False)
         self.tips_var = tk.BooleanVar(value=Tooltip.enabled)
         helpm.add_checkbutton(label="Show hover tips", variable=self.tips_var,
@@ -352,6 +355,18 @@ class BosunApp(ttk.Frame):
     def _open_recordings(self) -> None:
         from .recorder import recordings_dir
         open_folder(recordings_dir())
+
+    # ---------- faceplate ----------
+    def open_faceplate(self, full_screen: bool = False):
+        from .ui.faceplate import Faceplate
+
+        if getattr(self, "faceplate", None) is not None:
+            self.faceplate.lift()
+            return self.faceplate
+        self.faceplate = Faceplate(self)
+        if full_screen:
+            self.faceplate.after(200, lambda: self.faceplate.attributes("-fullscreen", True))
+        return self.faceplate
 
     # ---------- automatic device detection ----------
     def start_watching(self) -> None:
@@ -644,6 +659,9 @@ class BosunApp(ttk.Frame):
     def quit_app(self) -> None:
         try:
             self.stop_watching()
+            if getattr(self, "faceplate", None) is not None:
+                with contextlib.suppress(Exception):
+                    self.faceplate.destroy()
             if self.spectrum is not None:
                 self.spectrum.shutdown()
             self.audio_tab.shutdown()
@@ -687,21 +705,31 @@ def main(argv: list[str] | None = None) -> int:
 
     root.report_callback_exception = on_callback_error
     try:
-        app = BosunApp(root, first_run_wizard=not selftest)
+        app = BosunApp(root, first_run_wizard=not selftest and "--faceplate" not in args)
     except Exception as exc:
         crashlog.log_exception(type(exc), exc, exc.__traceback__, "starting app")
         root.destroy()
         _show_fatal(exc, log)
         return 1
     crashlog.write("window ready")
+    if "--faceplate" in args and not selftest:
+        root.after(300, lambda: app.open_faceplate(full_screen="--full-screen" in args))
     result = {"ok": True}
     if selftest:
         # CI: run the demo spectrum, optionally click through the setup wizard
         # and probe devices, then exit; fail if anything breaks.
         if app.spectrum is not None:
             app.spectrum.src_name.set("Demo (simulated signals)")
-            root.after(200, app.spectrum.toggle)
+            if "--faceplate" not in args:  # the faceplate's ON button starts it
+                root.after(200, app.spectrum.toggle)
             root.after(300, app.spectrum.find_sdrs)
+        if "--faceplate" in args:
+            def drive_faceplate():
+                fp = app.open_faceplate()
+                root.after(400, fp.power)
+                root.after(1400, fp.toggle_night)
+                root.after(2000, lambda: fp.tune(145.5e6, "FM"))
+            root.after(300, drive_faceplate)
         if "--wizard" in args:
             def drive_wizard():
                 from .ui.wizard import SetupWizard

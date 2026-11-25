@@ -62,13 +62,14 @@ jobs:
           ./dist/bosun-cli --version
           xvfb-run -a ./dist/Bosun --selftest
           xvfb-run -a ./dist/Bosun --selftest --wizard
+          xvfb-run -a ./dist/Bosun --selftest --faceplate
 
       - name: Smoke test (Windows)
         if: matrix.name == 'windows'
         shell: pwsh
         run: |
           ./dist/bosun-cli.exe --version
-          foreach ($a in @("--selftest", "--selftest --wizard")) {
+          foreach ($a in @("--selftest", "--selftest --wizard", "--selftest --faceplate")) {
             $p = Start-Process -FilePath dist/Bosun/Bosun.exe -ArgumentList $a -PassThru -Wait
             Write-Host "Bosun.exe $a exit code $($p.ExitCode)"
             if ($p.ExitCode -ne 0) {

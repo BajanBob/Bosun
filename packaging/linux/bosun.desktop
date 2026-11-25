@@ -8,3 +8,8 @@ Icon=bosun
 Terminal=false
 Categories=HamRadio;Network;Utility;
 Keywords=radio;ham;cat;civ;scanner;
+Actions=Faceplate;
+
+[Desktop Action Faceplate]
+Name=Faceplate (touch screen)
+Exec=Bosun --faceplate --full-screen

@@ -35,6 +35,12 @@ on version tags (`v*`), and from Actions → Build Bosun Packages → Run workfl
   (CH340 / Prolific, e.g. Radtel) are recognised and pointed to the Audio tab.
   Also Setup > Detect my radio now, and "Detect my radio" in the wizard.
   Turn off under Help > Watch for plugged-in radios and SDRs.
+- **Faceplate** (View > Faceplate, or the "Bosun Faceplate" shortcut, or
+  `Bosun --faceplate --full-screen`): a touch-screen front panel in green and
+  gold with a big ON button, large frequency display (swipe to tune), step and
+  mode keys, live spectrum (tap to tune), cognitive signal tiles (tap to tune;
+  AUTO follows the busiest signal, SCAN hops through them) and a red night
+  viewing mode that keeps your eyes dark-adapted.
 - **Hover tips** on every control (Help → Show hover tips to switch off).
 
 ## Notes

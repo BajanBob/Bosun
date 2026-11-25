@@ -9,7 +9,7 @@ mkdir -p "$BIN" "$APPS" "$ICONS"
 install -m 755 "$HERE/Bosun" "$BIN/Bosun"
 install -m 755 "$HERE/bosun-cli" "$BIN/bosun-cli"
 install -m 644 "$HERE/bosun.png" "$ICONS/bosun.png"
-sed "s|^Exec=.*|Exec=$BIN/Bosun|" "$HERE/bosun.desktop" > "$APPS/bosun.desktop"
+sed "s|^Exec=Bosun|Exec=$BIN/Bosun|" "$HERE/bosun.desktop" > "$APPS/bosun.desktop"
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS" || true
 echo "Bosun installed. Open it from your applications menu."
 if ! id -nG | grep -qwE "dialout|uucp"; then

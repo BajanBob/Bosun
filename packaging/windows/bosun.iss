@@ -32,6 +32,7 @@ Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
 [Icons]
 Name: "{group}\Bosun"; Filename: "{app}\Bosun.exe"
+Name: "{group}\Bosun Faceplate (touch screen)"; Filename: "{app}\Bosun.exe"; Parameters: "--faceplate --full-screen"
 Name: "{group}\Uninstall Bosun"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\Bosun"; Filename: "{app}\Bosun.exe"; Tasks: desktopicon
 
